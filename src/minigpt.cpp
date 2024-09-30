@@ -70,7 +70,11 @@ const char *rootCACertificate = \
 #include <vector>
 #include <string>
 
-std::vector<String> lineBuffer;  // Buffer to store lines of text
+struct Line {
+    String text;
+    uint16_t color;
+};
+std::vector<Line> lineBuffer;  // Buffer to store lines of text
 String currentLine = "";  // This stores the incomplete line being processed
 
 int numLinesOnScreen;  // Number of lines that fit on the screen (excluding input line)
@@ -84,24 +88,22 @@ void updateInputLine(String input) {
     tft->print("> " + input);
 }
 
-void printLineToTFT(int lineIndex, String text) {
+void printLineToTFT(int lineIndex, Line line) {
     if (lineIndex >= numLinesOnScreen - 1) {
-        lineIndex = numLinesOnScreen - 2;  // Adjust to prevent overwriting the input line
+        lineIndex = numLinesOnScreen - 2;  // Prevent overwriting the input line
     }
-    Serial.printf("Printing to TFT at lineIndex %d: %s\n", lineIndex, text.c_str());
     int yPos = lineIndex * fontHeight;
     tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
     tft->setCursor(leftMargin, yPos);
-    tft->setTextColor(TFT_WHITE, TFT_BLACK);
-    tft->print(text);
+    tft->setTextColor(line.color, TFT_BLACK);  // Use the color from the line
+    tft->print(line.text);
 }
 
 
+
 void scrollUpDisplay() {
-    Serial.println("Scrolling up display.");
     // Shift all lines up by one
     for (size_t i = 0; i < lineBuffer.size(); i++) {
-        Serial.printf("Redrawing line %d: %s\n", i, lineBuffer[i].c_str());
         printLineToTFT(i, lineBuffer[i]);
     }
     // Clear the last content line (before the input line)
@@ -111,7 +113,8 @@ void scrollUpDisplay() {
 
 
 
-void addLineToBuffer(String line) {
+
+void addLineToBuffer(String line, uint16_t color) {
     Serial.println("Adding line to buffer: " + line);
 
     // If buffer is full, scroll up
@@ -125,11 +128,12 @@ void addLineToBuffer(String line) {
     }
 
     // Add the new line to the buffer
-    lineBuffer.push_back(line);
+    // lineBuffer.push_back(line);
+    lineBuffer.push_back({line, color});
 
     Serial.println("Current lineBuffer contents after adding new line:");
     for (size_t i = 0; i < lineBuffer.size(); i++) {
-        Serial.printf("Buffer Line %d: %s\n", i, lineBuffer[i].c_str());
+        Serial.printf("Buffer Line %d: %s\n", i, lineBuffer[i].text.c_str());
     }
 
     // Print the new line at the correct position
@@ -137,17 +141,17 @@ void addLineToBuffer(String line) {
     if (lineIndex >= numLinesOnScreen - 1) {
         lineIndex = numLinesOnScreen - 2;  // Adjust to prevent writing over the input line
     }
-    printLineToTFT(lineIndex, line);
+    printLineToTFT(lineIndex, lineBuffer[lineIndex]);
     Serial.printf("Printed line at index %d: %s\n", lineIndex, line.c_str());
 }
 
 
-void updateLastLine(String line) {
+void updateLastLine(Line line) {
     int lastLineIndex = lineBuffer.size();
     if (lastLineIndex >= numLinesOnScreen) {
         lastLineIndex = numLinesOnScreen - 1;  // Adjust to prevent overwriting the input line
     }
-    Serial.printf("Updating last line at index %d with currentLine: %s\n", lastLineIndex, line.c_str());
+    Serial.printf("Updating last line at index %d with currentLine: %s\n", lastLineIndex, line.text.c_str());
     printLineToTFT(lastLineIndex, line);
 }
 
@@ -166,18 +170,18 @@ void processTextChunk(String chunk) {
     while ((newlinePos = currentLine.indexOf('\n')) != -1) {
         String linePart = currentLine.substring(0, newlinePos);
         currentLine = currentLine.substring(newlinePos + 1);
-        addLineToBuffer(linePart);
+        addLineToBuffer(linePart, TFT_WHITE);
     }
 
     // While currentLine is longer than maxWidth, extract full lines
     while (currentLine.length() >= maxWidth) {
         String linePart = currentLine.substring(0, maxWidth);
         currentLine = currentLine.substring(maxWidth);
-        addLineToBuffer(linePart);
+        addLineToBuffer(linePart, TFT_WHITE);
     }
 
     // Update the last line on the screen with the remaining currentLine
-    updateLastLine(currentLine);
+    updateLastLine({currentLine, TFT_WHITE});
 }
 
 
@@ -188,8 +192,8 @@ void sendQueryToOpenAI(String query) {
 
     if (!client.connect(openai_host, openai_port)) {
         Serial.println("Connection to OpenAI API failed!");
-        lineBuffer.push_back("Failed to connect to OpenAI API");
-        printLineToTFT(lineBuffer.size() - 1, "Failed to connect to OpenAI API");
+        lineBuffer.push_back({"Failed to connect to OpenAI API", TFT_RED});
+        printLineToTFT(lineBuffer.size() - 1, {"Failed to connect to OpenAI API", TFT_RED});
         return;
     }
 
@@ -223,7 +227,7 @@ void sendQueryToOpenAI(String query) {
                 headersReceived = true;
                 Serial.println("Headers received, streaming content...");
                 // lineBuffer.push_back("OpenAI says:");
-                addLineToBuffer("MiniGPT:");
+                addLineToBuffer("MiniGPT:", TFT_GREEN);
                 // printLineToTFT(lineBuffer.size() - 1, "OpenAI says:");
             } else if (line.startsWith("HTTP/1.1")) {
                 Serial.println("HTTP Response: " + line);
@@ -292,7 +296,7 @@ void sendQueryToOpenAI(String query) {
     //     currentLine = "";
     // }
 
-    lineBuffer.push_back("");  // Add a blank line after the conversation
+    lineBuffer.push_back({"", TFT_WHITE});  // Add a blank line after the conversation
     currentLine = "";
     Serial.println("OpenAI response complete.");
 }
@@ -333,7 +337,7 @@ void handleKeyPress() {
             Serial.println("Enter key detected.");
             if (keyValue.length() > 0) {
 
-                addLineToBuffer("> " + keyValue);
+                addLineToBuffer("> " + keyValue, TFT_YELLOW);
 
                 sendQueryToOpenAI(keyValue);
                 keyValue = ""; // Clear input after sending
@@ -394,7 +398,7 @@ void setup() {
     client.setCACert(rootCACertificate); // Add your root certificate here if needed
 
     // Send an initial query to OpenAI
-    addLineToBuffer("BlestX MiniGPT");
+    addLineToBuffer("BlestX MiniGPT", TFT_CYAN);
     sendQueryToOpenAI("Hello, please introduce yourself to me.");
     // Split the test sentence into words
     String sentence = testSentence;
