@@ -12,6 +12,22 @@
 #define STR(A) ST(A)
 
 
+#include <WebServer.h>
+
+#include <Preferences.h>
+
+Preferences preferences;
+
+
+
+// Define the SSID and password for the AP
+const char* ap_ssid = "MiniGPT_Setup";
+const char* ap_password = "12345678"; // Minimum 8 characters
+
+WebServer server(80);
+bool wifiConnected = false;
+
+
 // Constants for OpenAI
 const char *openai_api_key = STR(OPENAI_API_KEY); 
 const char *openai_host = "api.openai.com";
@@ -19,12 +35,6 @@ const int openai_port = 443;
 const char *openai_path = "/v1/chat/completions";
 
 const int leftMargin = 5;  // Left margin for text display
-
-int testLineNumber = 1;  // Global counter for test lines
-const char* testSentence = "A Transformer model is a type of deep learning architecture introduced in the paper *\"Attention is All You Need\"* by Vaswani et al. in 2017. It revolutionized natural language processing (NLP) and other sequence-based tasks. The key innovation in Transformers is the use of **self-attention mechanisms** that allow the model to weigh the importance of different words or tokens in a sequence relative to each other, without relying on recurrence or convolution, as in earlier models like RNNs and CNNs. Key components of the Transformer model include: 1. **Self-Attention Mechanism**: It enables the model to focus on different parts of the input sequence when making decisions, capturing relationships between all tokens at once, not just adjacent ones. 2. **Positional Encoding**: Since Transformers do not have an inherent sense of word order (unlike RNNs), they rely on positional encodings to inject information about the order of tokens. 3. **Encoder-Decoder Architecture**:4. **Multi-Head Attention**: Allows the model to focus on different parts of the sequence simultaneously, providing richer information about the relationships between tokens.5. **Feedforward Networks**: After the attention layers, the model applies position-wise feedforward networks to process the outputs further.Transformers have led to advances like GPT, BERT, and other state-of-the-art language models.A Transformer model is a type of deep learning architecture introduced in the paper *\"Attention is All You Need\"* by Vaswani et al. in 2017. It revolutionized natural language processing (NLP) and other sequence-based tasks. The key innovation in Transformers is the use of **self-attention mechanisms** that allow the model to weigh the importance of different words or tokens in a sequence relative to each other, without relying on recurrence or convolution, as in earlier models like RNNs and CNNs. Key components of the Transformer model include: 1. **Self-Attention Mechanism**: It enables the model to focus on different parts of the input sequence when making decisions, capturing relationships between all tokens at once, not just adjacent ones. 2. **Positional Encoding**: Since Transformers do not have an inherent sense of word order (unlike RNNs), they rely on positional encodings to inject information about the order of tokens. 3. **Encoder-Decoder Architecture**:4. **Multi-Head Attention**: Allows the model to focus on different parts of the sequence simultaneously, providing richer information about the relationships between tokens.5. **Feedforward Networks**: After the attention layers, the model applies position-wise feedforward networks to process the outputs further.Transformers have led to advances like GPT, BERT, and other state-of-the-art language models.";
-int testWordIndex = 0;
-
-std::vector<String> testWords;  // To store words from the test sentence
 
 
 // Constants for Wi-Fi
@@ -83,7 +93,7 @@ int fontHeight;        // Height of the current font
 void updateInputLine(String input) {
     int yPos = tft->height() - fontHeight;  // Position at the last line
     tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
-    tft->setCursor(0, yPos);
+    tft->setCursor(leftMargin, yPos);
     tft->setTextColor(TFT_YELLOW, TFT_BLACK);
     tft->print("> " + input);
 }
@@ -158,7 +168,7 @@ void updateLastLine(Line line) {
 
 void processTextChunk(String chunk) {
     Serial.println("Entering processTextChunk with chunk: " + chunk);
-    int maxWidth = 28;  // Adjust based on font and screen width
+    int maxWidth = 35;  // Adjust based on font and screen width
 
     // Append the incoming chunk to the current line
     currentLine += chunk;
@@ -301,21 +311,6 @@ void sendQueryToOpenAI(String query) {
     Serial.println("OpenAI response complete.");
 }
 
-void simulateWordByWordInput() {
-    if (testWordIndex >= testWords.size()) {
-        Serial.println("All test words have been processed.");
-        return;
-    }
-
-    // Simulate processing each word as if it were a chunk from OpenAI
-    String word = testWords[testWordIndex++];
-    Serial.println("Processing test word: " + word);
-    processTextChunk(word);
-
-    // Optionally, add a delay to simulate streaming
-    // delay(100); // Uncomment if you want to see the words appear with a delay
-}
-
 
 void handleKeyPress() {
     Wire.requestFrom(I2C_DEV_ADDR, 1);
@@ -343,9 +338,7 @@ void handleKeyPress() {
                 keyValue = ""; // Clear input after sending
                 updateInputLine(keyValue);
             } else {
-                // No input; simulate word-by-word input
-                Serial.println("Simulating word-by-word input.");
-                simulateWordByWordInput();
+                Serial.println("Empty input, skipping.");
             }
         } else if (key_ch == 0x08) { // Handle backspace
             if (!keyValue.isEmpty()) {
@@ -361,9 +354,109 @@ void handleKeyPress() {
 }
 
 
+bool connectAndRun(String ssid, String password) {
+    Serial.println("Connecting to Wi-Fi...");
+    WiFi.begin(ssid.c_str(), password.c_str());
+
+    int wifiAttempts = 0;
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+        if (++wifiAttempts > 20) {
+            Serial.println("Failed to connect to Wi-Fi.");
+            return false;
+        }
+    }
+
+    Serial.println("Connected to Wi-Fi!");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+
+    // Proceed with your main application logic
+
+    // Initialize secure client
+    client.setCACert(rootCACertificate); // Add your root certificate here if needed
+
+    // Send an initial query to OpenAI
+    addLineToBuffer("BlestX MiniGPT", TFT_CYAN);
+    sendQueryToOpenAI("Hello, please introduce yourself to me.");
+
+    return true;
+}
+
+void startWebServer() {
+    // Handle the root URL "/"
+    server.on("/", HTTP_GET, []() {
+        String html = "<!DOCTYPE html><html><body>";
+        html += "<h1>Configure Wi-Fi</h1>";
+        html += "<form action=\"/configure\" method=\"POST\">";
+        html += "SSID: <input type=\"text\" name=\"ssid\"><br>";
+        html += "Password: <input type=\"password\" name=\"password\"><br>";
+        html += "<input type=\"submit\" value=\"Submit\">";
+        html += "</form></body></html>";
+        server.send(200, "text/html", html);
+    });
+
+    // Handle form submission at "/configure"
+    server.on("/configure", HTTP_POST, []() {
+        String ssid = server.arg("ssid");
+        String password = server.arg("password");
+
+        // Validate input
+        if (ssid.length() == 0 || password.length() == 0) {
+            server.send(400, "text/html", "SSID and password cannot be empty.");
+            return;
+        }
+
+        // Save SSID and password to persistent storage or global variables
+        // For this example, we'll just print them
+        Serial.println("Received credentials:");
+        Serial.println("SSID: " + ssid);
+        Serial.println("Password: " + password);
+
+        // Send response
+        server.send(200, "text/html", "Credentials received. Attempting to connect to Wi-Fi network...");
+
+        // Now switch to STA mode and attempt to connect
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+
+        tft->fillScreen(TFT_BLACK);
+
+        if (!connectAndRun(ssid, password)) {
+            printLineToTFT(1, {"            MiniGPT Setup\n", TFT_CYAN});
+            printLineToTFT(3, {"Failed to connect to Wi-Fi network", TFT_RED});
+            return;
+        }
+
+        // store the credentials in non-volatile storage here
+
+        preferences.begin("wifiCreds", false);
+        preferences.putString("ssid", ssid);
+        preferences.putString("password", password);
+        preferences.end();
+
+
+        Serial.println("Connected to Wi-Fi!");
+        Serial.print("IP Address: ");
+        Serial.println(WiFi.localIP());
+        wifiConnected = true;
+
+
+        // Initialize secure client
+        client.setCACert(rootCACertificate); // Add your root certificate here if needed
+    });
+
+    // Start the server
+    server.begin();
+    Serial.println("Web server started.");
+}
+
+
+
 void setup() {
     Serial.begin(115200);
-    Wire.begin();
+    delay(1000); // Delay for 1 seconds to allow time to connect a serial monitor
 
     // Initialize TTGO watch and display
     ttgo = TTGOClass::getWatch();
@@ -384,36 +477,45 @@ void setup() {
     Serial.print("Number of lines on screen: ");
     Serial.println(numLinesOnScreen);
 
-    // Connect to Wi-Fi
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("Wi-Fi connected!");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
 
-    // Initialize secure client
-    client.setCACert(rootCACertificate); // Add your root certificate here if needed
+    // preferences.begin("wifiCreds", true); // Read-only
+    // String storedSSID = "";    // preferences.getString("ssid", "");
+    // String storedPassword = ""; // preferences.getString("password", "");
+    // preferences.end();
 
-    // Send an initial query to OpenAI
-    addLineToBuffer("BlestX MiniGPT", TFT_CYAN);
-    sendQueryToOpenAI("Hello, please introduce yourself to me.");
-    // Split the test sentence into words
-    String sentence = testSentence;
-    int startIndex = 0;
-    int spaceIndex = 0;
-    while ((spaceIndex = sentence.indexOf(' ', startIndex)) != -1) {
-        String word = sentence.substring(startIndex, spaceIndex);
-        testWords.push_back(word + " ");  // Include the space
-        startIndex = spaceIndex + 1;
-    }
-    // Add the last word
-    testWords.push_back(sentence.substring(startIndex) + " ");
+    // if (!connectAndRun(storedSSID, storedPassword)) {
+    //     Serial.println("Failed to connect to Wi-Fi network.");
+        // Set up the device as an access point
+        WiFi.softAP(ap_ssid, ap_password);
+
+        // Get the IP address of the AP
+        IPAddress IP = WiFi.softAPIP();
+        Serial.print("AP IP address: ");
+        Serial.println(IP);
+
+        printLineToTFT(1, {"            MiniGPT Setup\n", TFT_CYAN});
+        printLineToTFT(3, {"Connect to Wi-Fi network", TFT_WHITE});
+        printLineToTFT(5, {"SSID:      " + String(ap_ssid), TFT_GREEN});
+        printLineToTFT(6, {"Password: " + String(ap_password), TFT_GREEN});
+        printLineToTFT(8, {"Open a browser and go to", TFT_WHITE});
+        printLineToTFT(10, {"        " + IP.toString(), TFT_GREEN});
+        printLineToTFT(12, {"to configure the Wi-Fi settings.", TFT_WHITE});
+
+        // Start the web server
+        startWebServer();
+    // }
 }
 
+
+
 void loop() {
+    // Handle client requests
+    server.handleClient();
+
+    if (!wifiConnected) {
+        return;
+    }
+
     // Continuously read keyboard input
     handleKeyPress();
 }
