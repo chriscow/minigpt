@@ -12,11 +12,7 @@
 #define STR(A) ST(A)
 
 
-#include <WebServer.h>
-
-#include <Preferences.h>
-
-Preferences preferences;
+#include <WiFiManager.h>
 
 
 
@@ -123,7 +119,6 @@ void scrollUpDisplay() {
 
 
 
-
 void addLineToBuffer(String line, uint16_t color) {
     Serial.println("Adding line to buffer: " + line);
 
@@ -138,7 +133,6 @@ void addLineToBuffer(String line, uint16_t color) {
     }
 
     // Add the new line to the buffer
-    // lineBuffer.push_back(line);
     lineBuffer.push_back({line, color});
 
     Serial.println("Current lineBuffer contents after adding new line:");
@@ -146,24 +140,32 @@ void addLineToBuffer(String line, uint16_t color) {
         Serial.printf("Buffer Line %d: %s\n", i, lineBuffer[i].text.c_str());
     }
 
-    // Print the new line at the correct position
+    // Calculate the line index
     int lineIndex = lineBuffer.size() - 1;
-    if (lineIndex >= numLinesOnScreen - 1) {
-        lineIndex = numLinesOnScreen - 2;  // Adjust to prevent writing over the input line
+    if (lineIndex < 0) {
+        lineIndex = 0;
     }
+    if (lineIndex >= numLinesOnScreen - 2) {
+        lineIndex = numLinesOnScreen - 2;  // Adjust to prevent overwriting the input line
+    }
+
+    // Print the new line at the correct position
     printLineToTFT(lineIndex, lineBuffer[lineIndex]);
     Serial.printf("Printed line at index %d: %s\n", lineIndex, line.c_str());
 }
 
-
 void updateLastLine(Line line) {
-    int lastLineIndex = lineBuffer.size();
-    if (lastLineIndex >= numLinesOnScreen) {
-        lastLineIndex = numLinesOnScreen - 1;  // Adjust to prevent overwriting the input line
+    int lineIndex = lineBuffer.size() - 1;
+    if (lineIndex < 0) {
+        lineIndex = 0;
     }
-    Serial.printf("Updating last line at index %d with currentLine: %s\n", lastLineIndex, line.text.c_str());
-    printLineToTFT(lastLineIndex, line);
+    if (lineIndex >= numLinesOnScreen - 2) {
+        lineIndex = numLinesOnScreen - 2;  // Adjust to prevent overwriting the input line
+    }
+    Serial.printf("Updating last line at index %d with currentLine: %s\n", lineIndex, line.text.c_str());
+    printLineToTFT(lineIndex, line);
 }
+
 
 
 void processTextChunk(String chunk) {
@@ -180,18 +182,18 @@ void processTextChunk(String chunk) {
     while ((newlinePos = currentLine.indexOf('\n')) != -1) {
         String linePart = currentLine.substring(0, newlinePos);
         currentLine = currentLine.substring(newlinePos + 1);
-        addLineToBuffer(linePart, TFT_WHITE);
+        addLineToBuffer(linePart, TFT_LIGHTGREY);
     }
 
     // While currentLine is longer than maxWidth, extract full lines
     while (currentLine.length() >= maxWidth) {
         String linePart = currentLine.substring(0, maxWidth);
         currentLine = currentLine.substring(maxWidth);
-        addLineToBuffer(linePart, TFT_WHITE);
+        addLineToBuffer(linePart, TFT_LIGHTGREY);
     }
 
     // Update the last line on the screen with the remaining currentLine
-    updateLastLine({currentLine, TFT_WHITE});
+    updateLastLine({currentLine, TFT_LIGHTGREY});
 }
 
 
@@ -202,8 +204,7 @@ void sendQueryToOpenAI(String query) {
 
     if (!client.connect(openai_host, openai_port)) {
         Serial.println("Connection to OpenAI API failed!");
-        lineBuffer.push_back({"Failed to connect to OpenAI API", TFT_RED});
-        printLineToTFT(lineBuffer.size() - 1, {"Failed to connect to OpenAI API", TFT_RED});
+        addLineToBuffer("Failed to connect to OpenAI API", TFT_RED);
         return;
     }
 
@@ -236,8 +237,8 @@ void sendQueryToOpenAI(String query) {
             if (line == "\r") {
                 headersReceived = true;
                 Serial.println("Headers received, streaming content...");
-                // lineBuffer.push_back("OpenAI says:");
-                addLineToBuffer("MiniGPT:", TFT_GREEN);
+                // addLineToBuffer("MiniGPT:", TFT_GREEN);
+                // addLineToBuffer("", TFT_GREEN);
                 // printLineToTFT(lineBuffer.size() - 1, "OpenAI says:");
             } else if (line.startsWith("HTTP/1.1")) {
                 Serial.println("HTTP Response: " + line);
@@ -301,12 +302,12 @@ void sendQueryToOpenAI(String query) {
     client.stop();
 
     // At the end of the OpenAI response
-    // if (currentLine.length() > 0) {
-    //     addLineToBuffer(currentLine);
-    //     currentLine = "";
-    // }
+    if (currentLine.length() > 0) {
+        Serial.println("End of chat with last line remaining: " + currentLine);
+        addLineToBuffer(currentLine, TFT_LIGHTGREY);
+        currentLine = "";
+    }
 
-    lineBuffer.push_back({"", TFT_WHITE});  // Add a blank line after the conversation
     currentLine = "";
     Serial.println("OpenAI response complete.");
 }
@@ -332,6 +333,7 @@ void handleKeyPress() {
             Serial.println("Enter key detected.");
             if (keyValue.length() > 0) {
 
+                addLineToBuffer("", TFT_YELLOW);
                 addLineToBuffer("> " + keyValue, TFT_YELLOW);
 
                 sendQueryToOpenAI(keyValue);
@@ -354,103 +356,35 @@ void handleKeyPress() {
 }
 
 
-bool connectAndRun(String ssid, String password) {
-    Serial.println("Connecting to Wi-Fi...");
-    WiFi.begin(ssid.c_str(), password.c_str());
+// bool connectAndRun(String ssid, String password) {
+//     Serial.println("Connecting to Wi-Fi...");
+//     WiFi.begin(ssid.c_str(), password.c_str());
 
-    int wifiAttempts = 0;
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-        if (++wifiAttempts > 20) {
-            Serial.println("Failed to connect to Wi-Fi.");
-            return false;
-        }
-    }
+//     int wifiAttempts = 0;
+//     while (WiFi.status() != WL_CONNECTED) {
+//         delay(500);
+//         Serial.print(".");
+//         if (++wifiAttempts > 20) {
+//             Serial.println("Failed to connect to Wi-Fi.");
+//             return false;
+//         }
+//     }
 
-    Serial.println("Connected to Wi-Fi!");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
+//     Serial.println("Connected to Wi-Fi!");
+//     Serial.print("IP Address: ");
+//     Serial.println(WiFi.localIP());
 
-    // Proceed with your main application logic
+//     // Proceed with your main application logic
 
-    // Initialize secure client
-    client.setCACert(rootCACertificate); // Add your root certificate here if needed
+//     // Initialize secure client
+//     client.setCACert(rootCACertificate); // Add your root certificate here if needed
 
-    // Send an initial query to OpenAI
-    addLineToBuffer("BlestX MiniGPT", TFT_CYAN);
-    sendQueryToOpenAI("Hello, please introduce yourself to me.");
+//     // Send an initial query to OpenAI
+//     addLineToBuffer("BlestX MiniGPT", TFT_CYAN);
+//     sendQueryToOpenAI("Hello, please introduce yourself to me.");
 
-    return true;
-}
-
-void startWebServer() {
-    // Handle the root URL "/"
-    server.on("/", HTTP_GET, []() {
-        String html = "<!DOCTYPE html><html><body>";
-        html += "<h1>Configure Wi-Fi</h1>";
-        html += "<form action=\"/configure\" method=\"POST\">";
-        html += "SSID: <input type=\"text\" name=\"ssid\"><br>";
-        html += "Password: <input type=\"password\" name=\"password\"><br>";
-        html += "<input type=\"submit\" value=\"Submit\">";
-        html += "</form></body></html>";
-        server.send(200, "text/html", html);
-    });
-
-    // Handle form submission at "/configure"
-    server.on("/configure", HTTP_POST, []() {
-        String ssid = server.arg("ssid");
-        String password = server.arg("password");
-
-        // Validate input
-        if (ssid.length() == 0 || password.length() == 0) {
-            server.send(400, "text/html", "SSID and password cannot be empty.");
-            return;
-        }
-
-        // Save SSID and password to persistent storage or global variables
-        // For this example, we'll just print them
-        Serial.println("Received credentials:");
-        Serial.println("SSID: " + ssid);
-        Serial.println("Password: " + password);
-
-        // Send response
-        server.send(200, "text/html", "Credentials received. Attempting to connect to Wi-Fi network...");
-
-        // Now switch to STA mode and attempt to connect
-        WiFi.softAPdisconnect(true);
-        WiFi.mode(WIFI_STA);
-
-        tft->fillScreen(TFT_BLACK);
-
-        if (!connectAndRun(ssid, password)) {
-            printLineToTFT(1, {"            MiniGPT Setup\n", TFT_CYAN});
-            printLineToTFT(3, {"Failed to connect to Wi-Fi network", TFT_RED});
-            return;
-        }
-
-        // store the credentials in non-volatile storage here
-
-        preferences.begin("wifiCreds", false);
-        preferences.putString("ssid", ssid);
-        preferences.putString("password", password);
-        preferences.end();
-
-
-        Serial.println("Connected to Wi-Fi!");
-        Serial.print("IP Address: ");
-        Serial.println(WiFi.localIP());
-        wifiConnected = true;
-
-
-        // Initialize secure client
-        client.setCACert(rootCACertificate); // Add your root certificate here if needed
-    });
-
-    // Start the server
-    server.begin();
-    Serial.println("Web server started.");
-}
+//     return true;
+// }
 
 
 
@@ -477,44 +411,33 @@ void setup() {
     Serial.print("Number of lines on screen: ");
     Serial.println(numLinesOnScreen);
 
+    WiFiManager wm;
 
-    // preferences.begin("wifiCreds", true); // Read-only
-    // String storedSSID = "";    // preferences.getString("ssid", "");
-    // String storedPassword = ""; // preferences.getString("password", "");
-    // preferences.end();
-
-    // if (!connectAndRun(storedSSID, storedPassword)) {
-    //     Serial.println("Failed to connect to Wi-Fi network.");
-        // Set up the device as an access point
-        WiFi.softAP(ap_ssid, ap_password);
-
-        // Get the IP address of the AP
-        IPAddress IP = WiFi.softAPIP();
-        Serial.print("AP IP address: ");
-        Serial.println(IP);
-
+    // Automatically connect using saved credentials,
+    // or start the configuration portal if none are saved
+    if (!wm.autoConnect("MiniGPT")) {
+        tft->fillScreen(TFT_BLACK);
         printLineToTFT(1, {"            MiniGPT Setup\n", TFT_CYAN});
-        printLineToTFT(3, {"Connect to Wi-Fi network", TFT_WHITE});
-        printLineToTFT(5, {"SSID:      " + String(ap_ssid), TFT_GREEN});
-        printLineToTFT(6, {"Password: " + String(ap_password), TFT_GREEN});
-        printLineToTFT(8, {"Open a browser and go to", TFT_WHITE});
-        printLineToTFT(10, {"        " + IP.toString(), TFT_GREEN});
-        printLineToTFT(12, {"to configure the Wi-Fi settings.", TFT_WHITE});
+        printLineToTFT(3, {"Failed to connect to Wi-Fi network", TFT_RED});
 
-        // Start the web server
-        startWebServer();
-    // }
+        Serial.println("Failed to connect or timeout occurred");
+        return;
+    }
+    else
+    {
+        Serial.println("Connected to Wi-Fi");
+
+        client.setCACert(rootCACertificate); // Add your root certificate here if needed
+
+        // Send an initial query to OpenAI
+        addLineToBuffer("            BlestX MiniGPT", TFT_CYAN);
+        sendQueryToOpenAI("Hello, please introduce yourself to me.");
+    }
 }
 
 
 
 void loop() {
-    // Handle client requests
-    server.handleClient();
-
-    if (!wifiConnected) {
-        return;
-    }
 
     // Continuously read keyboard input
     handleKeyPress();
