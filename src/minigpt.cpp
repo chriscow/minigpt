@@ -71,6 +71,13 @@ String currentLine = "";       // This stores the incomplete line being processe
 int numLinesOnScreen;  // Number of lines that fit on the screen (excluding input line)
 int fontHeight;        // Height of the current font
 
+// Struct to hold conversation messages
+struct ChatMessage {
+    String role;
+    String content;
+};
+std::vector<ChatMessage> conversationHistory;  // Conversation history
+
 void updateInputLine(String input) {
     int yPos = tft->height() - fontHeight;  // Position at the last line
 
@@ -128,10 +135,6 @@ void updateInputLine(String input) {
     tft->print(displayText);
 }
 
-
-
-
-
 void printLineToTFT(int lineIndex, Line line) {
     if (lineIndex >= numLinesOnScreen - 1) {
         lineIndex = numLinesOnScreen - 2;  // Prevent overwriting the input line
@@ -179,7 +182,8 @@ void updateLastLine(Line line) {
     printLineToTFT(lineIndex, line);
 }
 
-void processTextChunk(String chunk) {
+void processTextChunk(String chunk, String& assistantReply) {
+    assistantReply += chunk;
     int maxWidth = 35;  // Adjust based on font and screen width
     currentLine += chunk;
 
@@ -218,6 +222,13 @@ void processTextChunk(String chunk) {
     updateLastLine({currentLine, TFT_LIGHTGREY});
 }
 
+void pruneConversationHistory() {
+    const int MAX_HISTORY_MESSAGES = 10; // Number of messages excluding the system prompt
+    int messagesToRemove = conversationHistory.size() - (MAX_HISTORY_MESSAGES + 1);
+    if (messagesToRemove > 0) {
+        conversationHistory.erase(conversationHistory.begin() + 1, conversationHistory.begin() + 1 + messagesToRemove);
+    }
+}
 
 void sendQueryToOpenAI(String query) {
     updateInputLine("");
@@ -226,8 +237,24 @@ void sendQueryToOpenAI(String query) {
         addLineToBuffer("Failed to connect to OpenAI API", TFT_RED);
         return;
     }
-    // Prepare the JSON payload with the "stream" option set to true
-    String payload = "{\"model\":\"gpt-3.5-turbo\",\"messages\":[{\"role\":\"system\",\"content\":\"You are MiniGPT, a chat interface running on an Espressif ESP32, inside of a LilyGo T-Watch.\"},{\"role\":\"user\",\"content\":\"" + query + "\"}],\"stream\":true}";
+
+    // Build the JSON payload with the conversation history
+    const size_t capacity = 8192; // Adjust as necessary based on expected conversation size
+    DynamicJsonDocument payloadDoc(capacity);
+
+    payloadDoc["model"] = "gpt-3.5-turbo";
+    payloadDoc["stream"] = true;
+    JsonArray messages = payloadDoc.createNestedArray("messages");
+
+    for (const auto& msg : conversationHistory) {
+        JsonObject messageObj = messages.createNestedObject();
+        messageObj["role"] = msg.role;
+        messageObj["content"] = msg.content;
+    }
+
+    String payload;
+    serializeJson(payloadDoc, payload);
+
     // Send HTTP headers
     client.println("POST " + String(openai_path) + " HTTP/1.1");
     client.println("Host: " + String(openai_host));
@@ -236,9 +263,12 @@ void sendQueryToOpenAI(String query) {
     client.println("Content-Length: " + String(payload.length()));
     client.println();
     client.println(payload);
+
     // Wait for the OpenAI API response
     bool headersReceived = false;
     String line = "";
+    String assistantReply = "";  // Collect the assistant's reply
+
     // Read the response from the server
     while (client.connected()) {
         line = client.readStringUntil('\n');
@@ -269,7 +299,7 @@ void sendQueryToOpenAI(String query) {
                     const char* content = delta["content"];
                     if (content && strlen(content) > 0) {
                         // Process the content chunk and add it to the buffer when a complete line is formed
-                        processTextChunk(String(content));
+                        processTextChunk(String(content), assistantReply);
                     }
                 }
             }
@@ -286,6 +316,10 @@ void sendQueryToOpenAI(String query) {
         currentLine = "";
     }
     currentLine = "";
+
+    // Add the assistant's reply to the conversation history
+    conversationHistory.push_back({"assistant", assistantReply});
+    pruneConversationHistory();  // Prune history if necessary
 }
 
 void handleKeyPress() {
@@ -300,6 +334,8 @@ void handleKeyPress() {
             if (keyValue.length() > 0) {
                 addLineToBuffer("", TFT_YELLOW);
                 addLineToBuffer("> " + keyValue, TFT_YELLOW);
+                conversationHistory.push_back({"user", keyValue});
+                pruneConversationHistory();  // Prune history if necessary
                 sendQueryToOpenAI(keyValue);
                 keyValue = ""; // Clear input after sending
                 updateInputLine(keyValue);
@@ -349,11 +385,16 @@ void setup() {
     } else {
         Serial.println("Connected to Wi-Fi");
         client.setCACert(rootCACertificate); // Add your root certificate here if needed
+
+        // Initialize conversation history with the system prompt
+        conversationHistory.push_back({"system", "You are MiniGPT, a chat interface running on an Espressif ESP32, inside of a LilyGo T-Watch. Your screen is very tiny, and displays 40 characters wide and 20 rows. You are humourous love to make off color jokes about your screen size. Size isn't everything, right?"});
+
         // Send an initial query to OpenAI
         lineBuffer.clear();
         tft->fillScreen(TFT_BLACK);
         addLineToBuffer("            BlestX MiniGPT", TFT_CYAN);
-        sendQueryToOpenAI("Hello, please introduce yourself to me.");
+
+        sendQueryToOpenAI("Hello!  Please tell me about yourself and the hardware you are running on.");
     }
 }
 
