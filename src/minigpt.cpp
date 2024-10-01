@@ -22,10 +22,6 @@ const char* openai_path = "/v1/chat/completions";
 
 const int leftMargin = 5;  // Left margin for text display
 
-// Constants for Wi-Fi
-const char* ssid = STR(WIFI_SSID);
-const char* password = STR(WIFI_PASSWORD);
-
 // Setup for Keyboard I2C communication
 #define I2C_DEV_ADDR 0x55
 
@@ -184,7 +180,7 @@ void updateLastLine(Line line) {
 
 void processTextChunk(String chunk, String& assistantReply) {
     assistantReply += chunk;
-    int maxWidth = 35;  // Adjust based on font and screen width
+    int maxWidth = 40;  // Adjust based on font and screen width
     currentLine += chunk;
 
     // Process any newline characters in currentLine
@@ -242,7 +238,7 @@ void sendQueryToOpenAI(String query) {
     const size_t capacity = 8192; // Adjust as necessary based on expected conversation size
     DynamicJsonDocument payloadDoc(capacity);
 
-    payloadDoc["model"] = "gpt-3.5-turbo";
+    payloadDoc["model"] = "gpt-4o-mini";
     payloadDoc["stream"] = true;
     JsonArray messages = payloadDoc.createNestedArray("messages");
 
@@ -361,12 +357,12 @@ void setup() {
     tft = ttgo->tft;
     tft->fillScreen(TFT_BLACK);
     ttgo->openBL();
-    tft->setTextFont(2);
+    tft->setTextFont(2); // 1: 80 2: 40 4: 20  6: 8 chars per line
     tft->setRotation(1);
     fontHeight = tft->fontHeight();
     if (fontHeight == 0) {
         fontHeight = 16; // Default font height
-    }
+    }    
     numLinesOnScreen = tft->height() / fontHeight; // Calculate number of lines that fit on screen
     numLinesOnScreen -= 1; // Reserve the last line for input
     WiFiManager wm;
@@ -387,13 +383,16 @@ void setup() {
         client.setCACert(rootCACertificate); // Add your root certificate here if needed
 
         // Initialize conversation history with the system prompt
-        conversationHistory.push_back({"system", "You are MiniGPT, a chat interface running on an Espressif ESP32, inside of a LilyGo T-Watch. Your screen is very tiny, and displays 40 characters wide and 20 rows. You are humourous love to make off color jokes about your screen size. Size isn't everything, right?"});
+        conversationHistory.push_back({"system", 
+        "You are MiniGPT, a chat interface running on an Espressif ESP32, " \
+        "inside of a very tiny. Your screen is very tiny, and displays 40 " \
+        "characters wide and 20 rows. You are humourous love to make off color " \ 
+        "jokes about your screen size. Size isn't everything, right?"});
 
         // Send an initial query to OpenAI
         lineBuffer.clear();
         tft->fillScreen(TFT_BLACK);
         addLineToBuffer("            BlestX MiniGPT", TFT_CYAN);
-
         sendQueryToOpenAI("Hello!  Please tell me about yourself and the hardware you are running on.");
     }
 }
