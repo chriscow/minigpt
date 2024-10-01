@@ -73,11 +73,64 @@ int fontHeight;        // Height of the current font
 
 void updateInputLine(String input) {
     int yPos = tft->height() - fontHeight;  // Position at the last line
+
+    // Clear the input line area
     tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
-    tft->setCursor(leftMargin, yPos);
+
+    // Set text color
     tft->setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft->print("> " + input);
+
+    // Calculate maximum width for input text
+    int maxWidthPixels = tft->width() - leftMargin * 2;
+    int promptWidth = tft->textWidth("> ");
+    int availableWidth = maxWidthPixels - promptWidth;
+
+    // Prepare the input text
+    String inputText = input;
+    bool trimmed = false;
+
+    // Combine prompt and input text
+    String displayText = "> " + inputText;
+
+    // If the total text width exceeds the maximum width, start trimming
+    int textWidth = tft->textWidth(displayText);
+    if (textWidth > maxWidthPixels) {
+        trimmed = true;
+
+        // Width of the ellipsis
+        int ellipsisWidth = tft->textWidth("...");
+
+        // Available width for input text after accounting for prompt and ellipsis
+        int inputAvailableWidth = maxWidthPixels - promptWidth - ellipsisWidth;
+
+        // Trim the input text from the beginning until it fits
+        int startIndex = 0;
+        while (startIndex < inputText.length() && tft->textWidth(inputText.substring(startIndex)) > inputAvailableWidth) {
+            startIndex++;
+        }
+
+        // Add ellipsis to the trimmed input text
+        inputText = "..." + inputText.substring(startIndex);
+
+        // Reassemble the display text
+        displayText = "> " + inputText;
+
+        // Ensure the display text now fits within the maximum width
+        while (tft->textWidth(displayText) > maxWidthPixels && inputText.length() > 4) {
+            // Remove one more character after the ellipsis
+            inputText = "..." + inputText.substring(4); // Remove '...' and one more character
+            displayText = "> " + inputText;
+        }
+    }
+
+    // Set cursor to the left margin and print the display text
+    tft->setCursor(leftMargin, yPos);
+    tft->print(displayText);
 }
+
+
+
+
 
 void printLineToTFT(int lineIndex, Line line) {
     if (lineIndex >= numLinesOnScreen - 1) {
