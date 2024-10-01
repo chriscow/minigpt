@@ -95,19 +95,27 @@ void updateInputLine(String input) {
 }
 
 void printLineToTFT(int lineIndex, Line line) {
+    Serial.printf("[printLineToTFT] lineIndex: %d, line.text: %s\n", lineIndex, line.text.c_str());
+
+    // numLinesOnScreen is the total number of lines that fit on the screen minus 1 for the input line
+    // lineIndex is a zero-based index of the line to be printed
+
     if (lineIndex >= numLinesOnScreen - 1) {
+        Serial.printf("[printLineToTFT] !! lineIndex %d exceeds numLinesOnScreen %d. setting to %d\n", lineIndex, numLinesOnScreen, numLinesOnScreen - 2);
         lineIndex = numLinesOnScreen - 2;  // Prevent overwriting the input line
     }
+
     int yPos = lineIndex * fontHeight;
     tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
     tft->setCursor(leftMargin, yPos);
     tft->setTextColor(line.color, TFT_BLACK);  // Use the color from the line
-    tft->print(line.text);
+    tft->print(line.text.c_str());
 }
 
 
-
 void scrollUpDisplay() {
+    Serial.print("[scrollUpDisplay]");
+
     // Shift all lines up by one
     for (size_t i = 0; i < lineBuffer.size(); i++) {
         printLineToTFT(i, lineBuffer[i]);
@@ -117,19 +125,17 @@ void scrollUpDisplay() {
     tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
 }
 
-
-
 void addLineToBuffer(String line, uint16_t color) {
-    Serial.println("Adding line to buffer: " + line);
+    Serial.println("[addLineToBuffer] line: " + line);
 
     // If buffer is full, scroll up
-    if (lineBuffer.size() >= numLinesOnScreen - 2) {  // Reserve last line for input
+    if (lineBuffer.size() >= numLinesOnScreen - 1) {  // Reserve last line for input
         Serial.println("Buffer full before adding new line.");
         // Remove the first line from the buffer
         lineBuffer.erase(lineBuffer.begin());
         // Scroll up the display
         scrollUpDisplay();
-        Serial.println("Scrolled up display after removing first line.");
+        Serial.println("- [addLineToBuffer] Scrolled up display after removing first line.");
     }
 
     // Add the new line to the buffer
@@ -145,43 +151,45 @@ void addLineToBuffer(String line, uint16_t color) {
     if (lineIndex < 0) {
         lineIndex = 0;
     }
-    if (lineIndex >= numLinesOnScreen - 2) {
-        lineIndex = numLinesOnScreen - 2;  // Adjust to prevent overwriting the input line
+
+    if (lineIndex >= numLinesOnScreen - 1) {
+        lineIndex = numLinesOnScreen - 1;  // Adjust to prevent overwriting the input line
     }
 
     // Print the new line at the correct position
     printLineToTFT(lineIndex, lineBuffer[lineIndex]);
-    Serial.printf("Printed line at index %d: %s\n", lineIndex, line.c_str());
+    Serial.printf("[addLineToBuffer] Printed line at index %d: %s\n", lineIndex, line.c_str());
 }
 
 void updateLastLine(Line line) {
-    int lineIndex = lineBuffer.size() - 1;
+    int lineIndex = lineBuffer.size();
     if (lineIndex < 0) {
         lineIndex = 0;
     }
-    if (lineIndex >= numLinesOnScreen - 2) {
-        lineIndex = numLinesOnScreen - 2;  // Adjust to prevent overwriting the input line
+    if (lineIndex >= numLinesOnScreen - 1) {
+        lineIndex = numLinesOnScreen - 1;  // Adjust to prevent overwriting the input line
     }
-    Serial.printf("Updating last line at index %d with currentLine: %s\n", lineIndex, line.text.c_str());
+    Serial.printf("[updateLastLine] index: %d line: %s\n", lineIndex, line.text.c_str());
     printLineToTFT(lineIndex, line);
 }
 
 
 
 void processTextChunk(String chunk) {
-    Serial.println("Entering processTextChunk with chunk: " + chunk);
+    Serial.println("[processTextChunk] chunk: " + chunk);
     int maxWidth = 35;  // Adjust based on font and screen width
 
     // Append the incoming chunk to the current line
     currentLine += chunk;
 
-    Serial.println("Updated currentLine: " + currentLine);
+    Serial.println("- [processTextChunk] currentLine: " + currentLine);
 
     // Process any newline characters in currentLine
     int newlinePos;
     while ((newlinePos = currentLine.indexOf('\n')) != -1) {
         String linePart = currentLine.substring(0, newlinePos);
         currentLine = currentLine.substring(newlinePos + 1);
+        Serial.println("- [processTextChunk] Newline found. updated currentLine: " + currentLine);
         addLineToBuffer(linePart, TFT_LIGHTGREY);
     }
 
@@ -189,6 +197,7 @@ void processTextChunk(String chunk) {
     while (currentLine.length() >= maxWidth) {
         String linePart = currentLine.substring(0, maxWidth);
         currentLine = currentLine.substring(maxWidth);
+        Serial.println("- [processTextChunk] Extracted linePart: " + linePart + ", updated currentLine: " + currentLine);
         addLineToBuffer(linePart, TFT_LIGHTGREY);
     }
 
@@ -416,9 +425,14 @@ void setup() {
     // Automatically connect using saved credentials,
     // or start the configuration portal if none are saved
     if (!wm.autoConnect("MiniGPT")) {
+        lineBuffer.clear();
+
         tft->fillScreen(TFT_BLACK);
-        printLineToTFT(1, {"            MiniGPT Setup\n", TFT_CYAN});
-        printLineToTFT(3, {"Failed to connect to Wi-Fi network", TFT_RED});
+        addLineToBuffer("            MiniGPT Setup\n", TFT_CYAN);
+        addLineToBuffer("", TFT_CYAN);
+        addLineToBuffer("Failed to connect to Wi-Fi network", TFT_RED);
+        addLineToBuffer("", TFT_CYAN);
+        addLineToBuffer("Connect to MiniGPT Wi-Fi to configure", TFT_YELLOW);
 
         Serial.println("Failed to connect or timeout occurred");
         return;
@@ -430,6 +444,9 @@ void setup() {
         client.setCACert(rootCACertificate); // Add your root certificate here if needed
 
         // Send an initial query to OpenAI
+        lineBuffer.clear();
+        tft->fillScreen(TFT_BLACK);
+
         addLineToBuffer("            BlestX MiniGPT", TFT_CYAN);
         sendQueryToOpenAI("Hello, please introduce yourself to me.");
     }
