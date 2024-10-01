@@ -129,6 +129,7 @@ void updateLastLine(Line line) {
 void processTextChunk(String chunk) {
     int maxWidth = 35;  // Adjust based on font and screen width
     currentLine += chunk;
+
     // Process any newline characters in currentLine
     int newlinePos;
     while ((newlinePos = currentLine.indexOf('\n')) != -1) {
@@ -136,15 +137,34 @@ void processTextChunk(String chunk) {
         currentLine = currentLine.substring(newlinePos + 1);
         addLineToBuffer(linePart, TFT_LIGHTGREY);
     }
+
     // While currentLine is longer than maxWidth, extract full lines
     while (currentLine.length() >= maxWidth) {
-        String linePart = currentLine.substring(0, maxWidth);
-        currentLine = currentLine.substring(maxWidth);
+        // Find the last space within maxWidth characters
+        int spacePos = currentLine.lastIndexOf(' ', maxWidth - 1);
+        int breakPos;
+        if (spacePos != -1) {
+            breakPos = spacePos;
+        } else {
+            // No space found, force break at maxWidth
+            breakPos = maxWidth;
+        }
+
+        String linePart = currentLine.substring(0, breakPos);
+        currentLine = currentLine.substring(breakPos);
+
+        // Remove leading spaces from currentLine
+        while (currentLine.length() > 0 && currentLine[0] == ' ') {
+            currentLine = currentLine.substring(1);
+        }
+
         addLineToBuffer(linePart, TFT_LIGHTGREY);
     }
+
     // Update the last line on the screen with the remaining currentLine
     updateLastLine({currentLine, TFT_LIGHTGREY});
 }
+
 
 void sendQueryToOpenAI(String query) {
     updateInputLine("");
