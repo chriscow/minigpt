@@ -65,7 +65,10 @@ std::vector<Line> lineBuffer;  // Buffer to store lines of text
 String currentLine = "";       // This stores the incomplete line being processed
 
 int numLinesOnScreen;  // Number of lines that fit on the screen (excluding input line)
+int textFont = 2;      // Current font to use
 int fontHeight;        // Height of the current font
+int font2CharsPerLine = 40; // Number of characters per line for font size 2
+int font4CharsPerLine = 20; // Number of characters per line for font size 4
 
 // Struct to hold conversation messages
 struct ChatMessage {
@@ -73,6 +76,7 @@ struct ChatMessage {
     String content;
 };
 std::vector<ChatMessage> conversationHistory;  // Conversation history
+
 
 void updateInputLine(String input) {
     int yPos = tft->height() - fontHeight;  // Position at the last line
@@ -180,7 +184,7 @@ void updateLastLine(Line line) {
 
 void processTextChunk(String chunk, String& assistantReply) {
     assistantReply += chunk;
-    int maxWidth = 40;  // Adjust based on font and screen width
+    int maxWidth = textFont == 2 ? font2CharsPerLine : font4CharsPerLine;  // Adjust based on font and screen width
     currentLine += chunk;
 
     // Process any newline characters in currentLine
@@ -318,6 +322,31 @@ void sendQueryToOpenAI(String query) {
     pruneConversationHistory();  // Prune history if necessary
 }
 
+
+void setTextFont(int fontNum) {
+    textFont = fontNum;
+    tft->setTextFont(textFont); // 1: 80 2: 40 4: 20  6: 8 chars per line
+    fontHeight = tft->fontHeight();
+    if (fontHeight == 0) {
+        fontHeight = 16; // Default font height
+    }    
+
+    numLinesOnScreen = tft->height() / fontHeight; // Calculate number of lines that fit on screen
+    numLinesOnScreen -= 1; // Reserve the last line for input
+
+    lineBuffer.clear();
+    tft->fillScreen(TFT_BLACK);
+
+    // calculate how many spaces I need before BlestX below to center it depending on font size
+    // create a string with the spaces and append "BlestX MiniGPT" to it
+    String spaces = "";
+    for (int i = 0; i < (tft->width() - tft->textWidth("BlestX MiniGPT")) / 2; i++) {
+        spaces += " ";
+    }
+    addLineToBuffer(spaces + "BlestX MiniGPT", TFT_CYAN);
+    sendQueryToOpenAI("Hello!  Please tell me about yourself and the hardware you are running on.");
+}
+
 void handleKeyPress() {
     Wire.requestFrom(I2C_DEV_ADDR, 1);
     while (Wire.available() > 0) {
@@ -335,6 +364,12 @@ void handleKeyPress() {
                 sendQueryToOpenAI(keyValue);
                 keyValue = ""; // Clear input after sending
                 updateInputLine(keyValue);
+            }
+        } else if (key_ch == 0x2B) { // Handle '+' key to make toggle the font size to 4 and back to 2
+            if (textFont == 2) {
+                setTextFont(4);
+            } else {
+                setTextFont(2);
             }
         } else if (key_ch == 0x08) { // Handle backspace
             if (!keyValue.isEmpty()) {
@@ -357,14 +392,9 @@ void setup() {
     tft = ttgo->tft;
     tft->fillScreen(TFT_BLACK);
     ttgo->openBL();
-    tft->setTextFont(2); // 1: 80 2: 40 4: 20  6: 8 chars per line
     tft->setRotation(1);
-    fontHeight = tft->fontHeight();
-    if (fontHeight == 0) {
-        fontHeight = 16; // Default font height
-    }    
-    numLinesOnScreen = tft->height() / fontHeight; // Calculate number of lines that fit on screen
-    numLinesOnScreen -= 1; // Reserve the last line for input
+    setTextFont(textFont);
+
     WiFiManager wm;
     // Automatically connect using saved credentials,
     // or start the configuration portal if none are saved
@@ -387,7 +417,7 @@ void setup() {
         "You are MiniGPT, a chat interface running on an Espressif ESP32, " \
         "inside of a very tiny computer with a tiny keyboard, about the size a " \
         "mouse would use. Your screen is very tiny, and displays 40 " \
-        "characters wide and 20 rows. You are humourous love to make off color " \ 
+        "characters wide and 20 rows. You are a humourous little guy and make off color " \
         "jokes about your screen size. Size isn't everything, right?"});
 
         // Send an initial query to OpenAI
