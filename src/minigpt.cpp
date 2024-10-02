@@ -67,8 +67,17 @@ String currentLine = "";       // This stores the incomplete line being processe
 int numLinesOnScreen;  // Number of lines that fit on the screen (excluding input line)
 int textFont = 2;      // Current font to use
 int fontHeight;        // Height of the current font
-int font2CharsPerLine = 40; // Number of characters per line for font size 2
+int font2CharsPerLine = 39; // Number of characters per line for font size 2
 int font4CharsPerLine = 20; // Number of characters per line for font size 4
+
+
+// Scrolling control variables
+int displayStartIndex = 0;  // Index of the first line to display
+bool touchActive = false;
+int prevTouchY = -1;
+int currTouchY = -1;
+int touchThreshold = 10; // Minimum movement in pixels to register a scroll
+
 
 // Struct to hold conversation messages
 struct ChatMessage {
@@ -77,6 +86,17 @@ struct ChatMessage {
 };
 std::vector<ChatMessage> conversationHistory;  // Conversation history
 
+
+void printLineToTFT(int lineIndexOnScreen, Line line) {
+    if (lineIndexOnScreen >= numLinesOnScreen - 1) {
+        lineIndexOnScreen = numLinesOnScreen - 2;  // Prevent overwriting the input line
+    }
+    int yPos = lineIndexOnScreen * fontHeight;
+    tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
+    tft->setCursor(leftMargin, yPos);
+    tft->setTextColor(line.color, TFT_BLACK);  // Use the color from the line
+    tft->print(line.text.c_str());
+}
 
 void updateInputLine(String input) {
     int yPos = tft->height() - fontHeight;  // Position at the last line
@@ -135,16 +155,67 @@ void updateInputLine(String input) {
     tft->print(displayText);
 }
 
-void printLineToTFT(int lineIndex, Line line) {
-    if (lineIndex >= numLinesOnScreen - 1) {
-        lineIndex = numLinesOnScreen - 2;  // Prevent overwriting the input line
+void redrawDisplay() {
+    // Clear the display area except the input line
+    tft->fillRect(0, 0, tft->width(), tft->height() - fontHeight, TFT_BLACK);
+    int maxLines = min(numLinesOnScreen - 1, (int)lineBuffer.size() - displayStartIndex);
+    for (int i = 0; i < maxLines; i++) {
+        int lineIndex = displayStartIndex + i;
+        if (lineIndex < lineBuffer.size()) {
+            printLineToTFT(i, lineBuffer[lineIndex]);
+        }
     }
-    int yPos = lineIndex * fontHeight;
-    tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
-    tft->setCursor(leftMargin, yPos);
-    tft->setTextColor(line.color, TFT_BLACK);  // Use the color from the line
-    tft->print(line.text.c_str());
+    // Update the input line
+    updateInputLine(keyValue);
 }
+
+void scrollUp() {
+    if (displayStartIndex + numLinesOnScreen - 1 < lineBuffer.size()) {
+        displayStartIndex++;
+        redrawDisplay();
+    }
+}
+
+void scrollDown() {
+    if (displayStartIndex > 0) {
+        displayStartIndex--;
+        redrawDisplay();
+    }
+}
+
+
+void handleTouchInput() {
+    int16_t x, y;
+    ttgo->getTouch(x, y);
+    if (x == -1 && y == -1) {
+        // No touch detected
+        touchActive = false;
+        prevTouchY = -1;
+    } else {
+        // Touch detected
+        if (!touchActive) {
+            // Touch just started
+            touchActive = true;
+            prevTouchY = y;
+        } else {
+            // Touch is ongoing
+            currTouchY = y;
+            int deltaY = currTouchY - prevTouchY;
+            if (abs(deltaY) >= touchThreshold) {
+                // User has dragged up or down
+                if (deltaY > 0) {
+                    // User dragged down
+                    scrollDown();
+                } else {
+                    // User dragged up
+                    scrollUp();
+                }
+                prevTouchY = currTouchY;
+            }
+        }
+    }
+}
+
 
 void scrollUpDisplay() {
     for (size_t i = 0; i < lineBuffer.size(); i++) {
@@ -156,20 +227,19 @@ void scrollUpDisplay() {
 }
 
 void addLineToBuffer(String line, uint16_t color) {
-    if (lineBuffer.size() >= numLinesOnScreen - 1) {  // Reserve last line for input
-        lineBuffer.erase(lineBuffer.begin());
-        scrollUpDisplay();
-    }
     lineBuffer.push_back({line, color});
-    int lineIndex = lineBuffer.size() - 1;
-    if (lineIndex < 0) {
-        lineIndex = 0;
+    const int MAX_BUFFER_LINES = 200; // Adjust as needed
+    if (lineBuffer.size() > MAX_BUFFER_LINES) {
+        // Remove oldest lines to prevent overflow
+        lineBuffer.erase(lineBuffer.begin(), lineBuffer.begin() + (lineBuffer.size() - MAX_BUFFER_LINES));
     }
-    if (lineIndex >= numLinesOnScreen - 1) {
-        lineIndex = numLinesOnScreen - 1;  // Adjust to prevent overwriting the input line
+    // Keep the display at the bottom when new lines are added
+    if (displayStartIndex + numLinesOnScreen - 1 >= lineBuffer.size() - 1) {
+        displayStartIndex = max(0, (int)lineBuffer.size() - (numLinesOnScreen - 1));
+        redrawDisplay();
     }
-    printLineToTFT(lineIndex, lineBuffer[lineIndex]);
 }
+
 
 void updateLastLine(Line line) {
     int lineIndex = lineBuffer.size();
@@ -340,11 +410,11 @@ void setTextFont(int fontNum) {
     // calculate how many spaces I need before BlestX below to center it depending on font size
     // create a string with the spaces and append "BlestX MiniGPT" to it
     String spaces = "";
-    for (int i = 0; i < (tft->width() - tft->textWidth("BlestX MiniGPT")) / 2; i++) {
+    int screenWidth = textFont == 2 ? font2CharsPerLine : font4CharsPerLine;
+    for (int i = 0; i < (screenWidth - 15) / 2; i++) {
         spaces += " ";
     }
     addLineToBuffer(spaces + "BlestX MiniGPT", TFT_CYAN);
-    sendQueryToOpenAI("Hello!  Please tell me about yourself and the hardware you are running on.");
 }
 
 void handleKeyPress() {
@@ -361,15 +431,27 @@ void handleKeyPress() {
                 addLineToBuffer("> " + keyValue, TFT_YELLOW);
                 conversationHistory.push_back({"user", keyValue});
                 pruneConversationHistory();  // Prune history if necessary
-                sendQueryToOpenAI(keyValue);
                 keyValue = ""; // Clear input after sending
                 updateInputLine(keyValue);
+
+                // jump back to the bottom
+                int bottomIndex = max(0, (int)lineBuffer.size() - (numLinesOnScreen - 1));
+                if (displayStartIndex != bottomIndex) {
+                    displayStartIndex = bottomIndex;
+                    redrawDisplay();
+                }
+                redrawDisplay();
+
+                // Send the query to OpenAI after updating the display
+                sendQueryToOpenAI(keyValue);
             }
         } else if (key_ch == 0x2B) { // Handle '+' key to make toggle the font size to 4 and back to 2
             if (textFont == 2) {
                 setTextFont(4);
+                sendQueryToOpenAI("I just switch to a smaller font so I can see 40 characters across the screen.");
             } else {
                 setTextFont(2);
+                sendQueryToOpenAI("I just switch to a bigger font so I can see what you are saying, you little thing, you.");
             }
         } else if (key_ch == 0x08) { // Handle backspace
             if (!keyValue.isEmpty()) {
@@ -393,15 +475,13 @@ void setup() {
     tft->fillScreen(TFT_BLACK);
     ttgo->openBL();
     tft->setRotation(1);
-    setTextFont(textFont);
 
     WiFiManager wm;
     // Automatically connect using saved credentials,
     // or start the configuration portal if none are saved
     if (!wm.autoConnect("MiniGPT")) {
-        lineBuffer.clear();
-        tft->fillScreen(TFT_BLACK);
-        addLineToBuffer("            MiniGPT Setup\n", TFT_CYAN);
+        setTextFont(4);
+        addLineToBuffer("MiniGPT Setup\n", TFT_CYAN);
         addLineToBuffer("", TFT_CYAN);
         addLineToBuffer("Failed to connect to Wi-Fi network", TFT_RED);
         addLineToBuffer("", TFT_CYAN);
@@ -421,14 +501,13 @@ void setup() {
         "jokes about your screen size. Size isn't everything, right?"});
 
         // Send an initial query to OpenAI
-        lineBuffer.clear();
-        tft->fillScreen(TFT_BLACK);
-        addLineToBuffer("            BlestX MiniGPT", TFT_CYAN);
+        setTextFont(2);
         sendQueryToOpenAI("Hello!  Please tell me about yourself and the hardware you are running on.");
     }
 }
-
 void loop() {
     // Continuously read keyboard input
     handleKeyPress();
+    // Handle touch input for scrolling
+    handleTouchInput();
 }
