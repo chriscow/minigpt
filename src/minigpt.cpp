@@ -27,6 +27,7 @@ const int leftMargin = 5;  // Left margin for text display
 
 TTGOClass* ttgo = nullptr;
 TFT_eSPI* tft;
+WiFiManager wm;
 
 String keyValue;
 char key_ch = ' ';
@@ -406,15 +407,22 @@ void setTextFont(int fontNum) {
 
     lineBuffer.clear();
     tft->fillScreen(TFT_BLACK);
+}
 
-    // calculate how many spaces I need before BlestX below to center it depending on font size
-    // create a string with the spaces and append "BlestX MiniGPT" to it
-    String spaces = "";
-    int screenWidth = textFont == 2 ? font2CharsPerLine : font4CharsPerLine;
-    for (int i = 0; i < (screenWidth - 15) / 2; i++) {
-        spaces += " ";
+void addCenteredLineToBuffer(String line, uint16_t color) {
+    int screenWidth = tft->width();
+    int pixelsNeeded = (screenWidth - tft->textWidth(line)) / 2;
+    int spaceWidth = tft->textWidth(" ");
+
+    int spaces = pixelsNeeded / spaceWidth;
+
+    String centeredLine = "";
+    // Add spaces to center the text
+    for (int i = 0; i < spaces; i++) {
+        centeredLine += " ";
     }
-    addLineToBuffer(spaces + "BlestX MiniGPT", TFT_CYAN);
+
+    addLineToBuffer(centeredLine + line, color);
 }
 
 void handleKeyPress() {
@@ -431,19 +439,30 @@ void handleKeyPress() {
                 addLineToBuffer("> " + keyValue, TFT_YELLOW);
                 conversationHistory.push_back({"user", keyValue});
                 pruneConversationHistory();  // Prune history if necessary
-                keyValue = ""; // Clear input after sending
                 updateInputLine(keyValue);
 
                 // jump back to the bottom
                 int bottomIndex = max(0, (int)lineBuffer.size() - (numLinesOnScreen - 1));
                 if (displayStartIndex != bottomIndex) {
                     displayStartIndex = bottomIndex;
-                    redrawDisplay();
+                    // redrawDisplay();
                 }
-                redrawDisplay();
 
                 // Send the query to OpenAI after updating the display
                 sendQueryToOpenAI(keyValue);
+
+                if (keyValue.equalsIgnoreCase("reboot")) {
+                    Serial.println("Rebooting...");
+                    delay(2000);
+                    ESP.restart(); // Or ESP.reboot() in some frameworks
+                } else if (keyValue.equalsIgnoreCase("reset")) {
+                    Serial.println("Resetting wifi and reboothing...");
+                    delay(2000);
+                    wm.resetSettings();
+                    ESP.restart();
+                }
+                keyValue = "";
+                redrawDisplay();
             }
         } else if (key_ch == 0x2B) { // Handle '+' key to make toggle the font size to 4 and back to 2
             if (textFont == 2) {
@@ -465,6 +484,24 @@ void handleKeyPress() {
     }
 }
 
+void configModeCallback (WiFiManager *wm) {
+    Serial.println("Entered config mode");
+    Serial.println(WiFi.softAPIP());
+
+    Serial.println(wm->getConfigPortalSSID());
+
+    setTextFont(4);
+    addCenteredLineToBuffer("BlestX MiniGPT", TFT_CYAN);
+    addCenteredLineToBuffer("Connect to", TFT_DARKGREY);
+    addLineToBuffer("", TFT_CYAN);
+    addCenteredLineToBuffer("MiniGPT", TFT_GREEN);
+    addLineToBuffer("", TFT_CYAN);
+    addCenteredLineToBuffer("Wi-Fi access point", TFT_DARKGREY);
+    addCenteredLineToBuffer("to configure", TFT_DARKGREY);
+
+    Serial.println("Failed to connect or timeout occurred");
+}
+
 void setup() {
     Serial.begin(115200);
     delay(1000); // Delay for 1 second to allow time to connect a serial monitor
@@ -476,18 +513,17 @@ void setup() {
     ttgo->openBL();
     tft->setRotation(1);
 
-    WiFiManager wm;
+    wm.setDebugOutput(true);
+    wm.setAPCallback(configModeCallback);
+    // wm.setConfigPortalTimeout(30);
+
     // Automatically connect using saved credentials,
     // or start the configuration portal if none are saved
     if (!wm.autoConnect("MiniGPT")) {
-        setTextFont(4);
-        addLineToBuffer("MiniGPT Setup\n", TFT_CYAN);
-        addLineToBuffer("", TFT_CYAN);
-        addLineToBuffer("Failed to connect to Wi-Fi network", TFT_RED);
-        addLineToBuffer("", TFT_CYAN);
-        addLineToBuffer("Connect to MiniGPT Wi-Fi to configure", TFT_YELLOW);
-        Serial.println("Failed to connect or timeout occurred");
-        return;
+        Serial.println("autoConnect returned false and timed out");
+        Serial.println("resetting and restarting");
+        wm.resetSettings();
+        ESP.restart();
     } else {
         Serial.println("Connected to Wi-Fi");
         client.setCACert(rootCACertificate); // Add your root certificate here if needed
@@ -502,6 +538,7 @@ void setup() {
 
         // Send an initial query to OpenAI
         setTextFont(2);
+        addCenteredLineToBuffer("BlestX MiniGPT", TFT_CYAN);
         sendQueryToOpenAI("Hello!  Please tell me about yourself and the hardware you are running on.");
     }
 }
