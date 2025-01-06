@@ -11,6 +11,13 @@
 #define ST(A) #A
 #define STR(A) ST(A)
 
+#define TFT_RETRO_GREEN      0x07E0      /*  51, 255,  51 */
+#define TFT_RETRO_AMBER      0xFD60      /* 255, 176,   0 */
+#define TFT_PET_PHOSPHOR    0xC6FF      /* 200, 220, 255 */
+
+bool goingRetro = false;
+uint16_t textColor = TFT_LIGHTGREY;
+
 WebServer server(80);
 bool wifiConnected = false;
 
@@ -19,6 +26,7 @@ const char* openai_api_key = STR(OPENAI_API_KEY);
 const char* openai_host = "api.openai.com";
 const int openai_port = 443;
 const char* openai_path = "/v1/chat/completions";
+
 
 const int leftMargin = 5;  // Left margin for text display
 
@@ -87,6 +95,8 @@ struct ChatMessage {
 };
 std::vector<ChatMessage> conversationHistory;  // Conversation history
 
+unsigned long lastBatteryCheck = 0;
+const unsigned long BATTERY_CHECK_INTERVAL = 30000; 
 
 void printLineToTFT(int lineIndexOnScreen, Line line) {
     if (lineIndexOnScreen >= numLinesOnScreen - 1) {
@@ -263,7 +273,7 @@ void processTextChunk(String chunk, String& assistantReply) {
     while ((newlinePos = currentLine.indexOf('\n')) != -1) {
         String linePart = currentLine.substring(0, newlinePos);
         currentLine = currentLine.substring(newlinePos + 1);
-        addLineToBuffer(linePart, TFT_LIGHTGREY);
+        addLineToBuffer(linePart, textColor);
     }
 
     // While currentLine is longer than maxWidth, extract full lines
@@ -286,11 +296,11 @@ void processTextChunk(String chunk, String& assistantReply) {
             currentLine = currentLine.substring(1);
         }
 
-        addLineToBuffer(linePart, TFT_LIGHTGREY);
+        addLineToBuffer(linePart, textColor);
     }
 
     // Update the last line on the screen with the remaining currentLine
-    updateLastLine({currentLine, TFT_LIGHTGREY});
+    updateLastLine({currentLine, textColor});
 }
 
 void pruneConversationHistory() {
@@ -313,7 +323,7 @@ void sendQueryToOpenAI(String query) {
     const size_t capacity = 8192; // Adjust as necessary based on expected conversation size
     DynamicJsonDocument payloadDoc(capacity);
 
-    payloadDoc["model"] = "gpt-4o-mini";
+    payloadDoc["model"] = STR(OPENAI_MODEL);
     payloadDoc["stream"] = true;
     JsonArray messages = payloadDoc.createNestedArray("messages");
 
@@ -383,7 +393,7 @@ void sendQueryToOpenAI(String query) {
     client.stop();
     // At the end of the OpenAI response
     if (currentLine.length() > 0) {
-        addLineToBuffer(currentLine, TFT_LIGHTGREY);
+        addLineToBuffer(currentLine, textColor);
         currentLine = "";
     }
     currentLine = "";
@@ -435,6 +445,7 @@ void handleKeyPress() {
         // Handle special keys like backspace or enter
         if (key_ch == '\n' || key_ch == 0x0D || key_ch == 0x0A) { // Add possible Enter keys
             if (keyValue.length() > 0) {
+                
                 addLineToBuffer("", TFT_YELLOW);
                 addLineToBuffer("> " + keyValue, TFT_YELLOW);
                 conversationHistory.push_back({"user", keyValue});
@@ -448,6 +459,54 @@ void handleKeyPress() {
                     // redrawDisplay();
                 }
 
+                float batteryVoltage = ttgo->power->getBattVoltage() / 1000.0;  // Convert to volts
+                int batteryPercentage = ttgo->power->getBattPercentage();
+                bool isCharging = ttgo->power->isChargeing();  // Note: this is the correct spelling in the library
+
+                if (batteryPercentage > 100) {
+                    batteryPercentage = 100;
+                }
+
+                unsigned long currentMillis = millis();
+                unsigned long seconds = currentMillis / 1000;
+
+                conversationHistory.push_back({"system", 
+                    "You have been running for " + String(seconds) + " seconds. " +
+                    "Your battery is at " + String(batteryPercentage) + "% and " +
+                    (isCharging ? "is charging." : "is not charging.") +
+                    " The battery voltage is " + String(batteryVoltage) + " volts." +
+                    " It's a tiny battery, so don't expect much."
+                });
+
+                if (keyValue.equalsIgnoreCase("go retro")) {
+                    randomSeed(millis());
+                    uint16_t color = random(3) == 0 ? TFT_RETRO_GREEN : (random(2) == 0 ? TFT_RETRO_AMBER : TFT_PET_PHOSPHOR);
+                    textColor = color;
+                    String colorString = color == 
+                        TFT_RETRO_GREEN ? 
+                        "monochrome P1 Phosphor (Green). Known as 'P1 phosphor green' " \
+                        "or commonly called 'monochrome green phosphor'. This " \
+                        "was used in many early terminals and computers like the " \
+                        "IBM 5151 monitor and was technically a yellow-green color." : 
+                        (color == TFT_RETRO_AMBER ? 
+                        "monochrome P3 Phosphor (Amber). Not actually yellow or gold, but a specific " \
+                        "orange-yellow color known as 'P3 phosphor' or 'amber monochrome'. " \
+                        "This was popular on monitors like the Princeton MAX-12 " \
+                        "and some Zenith monitors. The color was specifically " \
+                        "chosen because it was believed to cause less eye strain " \
+                        "than green phosphor." : 
+                        "monochrome Commodore PET P4 Phosphor. This was a unique color " \
+                        "used in the Commodore PET series of computers. P4 phosphor " \
+                        "was standard for black-and-white TVs and some early computer " \
+                        "monitors, producing a bluish-white glow.");
+
+                    conversationHistory.push_back({"system", 
+                    "Your screen colors have been updated. Your background is black." \
+                    "Your text foreground color is " + colorString + " You " \
+                    "have a vintage flair about you. Tell the user a little about the " \
+                    "history of this color based on the above information."});
+                }
+
                 // Send the query to OpenAI after updating the display
                 sendQueryToOpenAI(keyValue);
 
@@ -455,7 +514,7 @@ void handleKeyPress() {
                     Serial.println("Rebooting...");
                     delay(2000);
                     ESP.restart(); // Or ESP.reboot() in some frameworks
-                } else if (keyValue.equalsIgnoreCase("reset")) {
+                } else if (keyValue.equalsIgnoreCase("reset") || keyValue.equalsIgnoreCase("wifi")) {
                     Serial.println("Resetting wifi and reboothing...");
                     delay(2000);
                     wm.resetSettings();
@@ -467,10 +526,10 @@ void handleKeyPress() {
         } else if (key_ch == 0x2B) { // Handle '+' key to make toggle the font size to 4 and back to 2
             if (textFont == 2) {
                 setTextFont(4);
-                sendQueryToOpenAI("I just switch to a smaller font so I can see 40 characters across the screen.");
+                sendQueryToOpenAI("I just switched to a smaller font so I can see 40 characters across the screen.");
             } else {
                 setTextFont(2);
-                sendQueryToOpenAI("I just switch to a bigger font so I can see what you are saying, you little thing, you.");
+                sendQueryToOpenAI("I just switched to a bigger font so I can see what you are saying, you little thing, you.");
             }
         } else if (key_ch == 0x08) { // Handle backspace
             if (!keyValue.isEmpty()) {
@@ -491,10 +550,10 @@ void configModeCallback (WiFiManager *wm) {
     Serial.println(wm->getConfigPortalSSID());
 
     setTextFont(4);
-    addCenteredLineToBuffer("BlestX MiniGPT", TFT_CYAN);
+    addCenteredLineToBuffer(String(STR(COMPANY_NAME)) + " " + String(STR(NAME)), TFT_CYAN);
     addCenteredLineToBuffer("Connect to", TFT_DARKGREY);
     addLineToBuffer("", TFT_CYAN);
-    addCenteredLineToBuffer("MiniGPT", TFT_GREEN);
+    addCenteredLineToBuffer(STR(NAME), TFT_GREEN);
     addLineToBuffer("", TFT_CYAN);
     addCenteredLineToBuffer("Wi-Fi access point", TFT_DARKGREY);
     addCenteredLineToBuffer("to configure", TFT_DARKGREY);
@@ -519,7 +578,7 @@ void setup() {
 
     // Automatically connect using saved credentials,
     // or start the configuration portal if none are saved
-    if (!wm.autoConnect("MiniGPT")) {
+    if (!wm.autoConnect(STR(NAME))) {
         Serial.println("autoConnect returned false and timed out");
         Serial.println("resetting and restarting");
         wm.resetSettings();
@@ -529,22 +588,47 @@ void setup() {
         client.setCACert(rootCACertificate); // Add your root certificate here if needed
 
         // Initialize conversation history with the system prompt
-        conversationHistory.push_back({"system", 
-        "You are MiniGPT, a chat interface running on an Espressif ESP32, " \
-        "inside of a very tiny computer with a tiny keyboard, about the size a " \
-        "mouse would use. Your screen is very tiny, and displays 40 " \
-        "characters wide and 20 rows. You are a humourous little guy and make off color " \
-        "jokes about your screen size. Size isn't everything, right?"});
+        conversationHistory.push_back({"system",
+            "You are " + String(STR(NAME)) + ", a chat interface running on an Espressif ESP32, "
+            "inside of a very tiny computer with a tiny keyboard, about the size a "
+            "mouse would use. Your screen is very tiny, and displays 40 "
+            "characters wide and 20 rows. You are a humourous little guy and make off color "
+            "jokes about your screen size. Size isn't everything, right?"
+            "Your LLM model is " +
+                String(STR(OPENAI_MODEL)) + ", of course. "});
 
         // Send an initial query to OpenAI
         setTextFont(2);
-        addCenteredLineToBuffer("BlestX MiniGPT", TFT_CYAN);
+
+        String header = String(STR(COMPANY_NAME)) + " " + String(STR(NAME));
+        if (goingRetro) {
+            addCenteredLineToBuffer(header, textColor);
+        } else {
+            addCenteredLineToBuffer(header, TFT_CYAN);
+        }
         sendQueryToOpenAI("Hello!  Please tell me about yourself and the hardware you are running on.");
     }
 }
+
 void loop() {
-    // Continuously read keyboard input
+    // Existing code
     handleKeyPress();
-    // Handle touch input for scrolling
     handleTouchInput();
+
+    // Add battery monitoring
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastBatteryCheck >= BATTERY_CHECK_INTERVAL) {
+        lastBatteryCheck = currentMillis;
+        
+        // Get battery readings
+        float batteryVoltage = ttgo->power->getBattVoltage() / 1000.0;  // Convert to volts
+        int batteryPercentage = ttgo->power->getBattPercentage();
+        bool isCharging = ttgo->power->isChargeing();  // Note: this is the correct spelling in the library
+        
+        // Print battery status
+        Serial.printf("Battery: %.2fV | %d%% | %s\n", 
+                     batteryVoltage,
+                     batteryPercentage,
+                     isCharging ? "Charging" : "Not Charging");
+    }
 }
