@@ -115,7 +115,7 @@ void printLineToTFT(int lineIndexOnScreen, Line line) {
     int16_t width = tft->textWidth(line.text.c_str());
     if (width + leftMargin < tft->width()) {
         // Clear the rest of the line
-        tft->fillRect(width + leftMargin, yPos, tft->width() - width - leftMargin, fontHeight, TFT_BLACK);
+        tft->fillRect(width + leftMargin, yPos, tft->width(), fontHeight, TFT_BLACK);
     }
 }
 
@@ -252,7 +252,30 @@ void scrollUpDisplay() {
 }
 
 void addLineToBuffer(String line, uint16_t color) {
-    lineBuffer.push_back({line, color});
+    int textWidth = tft->textWidth(String(line));
+    int maxWidthPixels = tft->width() - leftMargin - rightMargin;
+    if (textWidth > maxWidthPixels) {
+        // Calculate the width of the ellipsis
+        int ellipsisWidth = tft->textWidth("...");
+        
+        // Find the break position using pixel measurements
+        int runningWidth = 0;
+        int breakPos = 0;
+        for (int i = 0; i < line.length(); i++) {
+            runningWidth += tft->textWidth(String(line[i]));
+            if (runningWidth + ellipsisWidth > maxWidthPixels) {
+                breakPos = i;
+                break;
+            }
+        }
+        
+        // Cut off the text and add an ellipsis
+        String linePart = line.substring(0, breakPos) + "...";
+        lineBuffer.push_back({linePart, color});
+    } else {
+        lineBuffer.push_back({line, color});
+    }
+
     const int MAX_BUFFER_LINES = 200; // Adjust as needed
     if (lineBuffer.size() > MAX_BUFFER_LINES) {
         // Remove oldest lines to prevent overflow
@@ -364,7 +387,7 @@ void sendQueryToOpenAI(String query) {
     }
 
     String payload;
-    serializeJson(payloadDoc, payload);
+    ArduinoJson::serializeJson(payloadDoc, payload);
 
     // Send HTTP headers
     client.println("POST " + String(openai_path) + " HTTP/1.1");
