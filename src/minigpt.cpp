@@ -15,6 +15,10 @@
 #define TFT_RETRO_AMBER      0xFD60      /* 255, 176,   0 */
 #define TFT_PET_PHOSPHOR    0xC6FF      /* 200, 220, 255 */
 
+const int leftMargin = 10;  // Left margin for text display
+const int rightMargin = 2;
+
+
 bool goingRetro = false;
 uint16_t textColor = TFT_LIGHTGREY;
 
@@ -28,7 +32,6 @@ const int openai_port = 443;
 const char* openai_path = "/v1/chat/completions";
 
 
-const int leftMargin = 5;  // Left margin for text display
 
 // Setup for Keyboard I2C communication
 #define I2C_DEV_ADDR 0x55
@@ -76,7 +79,7 @@ String currentLine = "";       // This stores the incomplete line being processe
 int numLinesOnScreen;  // Number of lines that fit on the screen (excluding input line)
 int textFont = 2;      // Current font to use
 int fontHeight;        // Height of the current font
-int font2CharsPerLine = 39; // Number of characters per line for font size 2
+int font2CharsPerLine = 40; // Number of characters per line for font size 2
 int font4CharsPerLine = 20; // Number of characters per line for font size 4
 
 
@@ -103,12 +106,14 @@ void printLineToTFT(int lineIndexOnScreen, Line line) {
         lineIndexOnScreen = numLinesOnScreen - 2;  // Prevent overwriting the input line
     }
     int yPos = lineIndexOnScreen * fontHeight;
-    // tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
+    
+    // clear the left margin of any "dirt" from previous text
+    tft->fillRect(0, yPos, leftMargin, fontHeight, TFT_BLACK);
     tft->setCursor(leftMargin, yPos);
     tft->setTextColor(line.color, TFT_BLACK);  // Use the color from the line
     tft->print(line.text.c_str());
     int16_t width = tft->textWidth(line.text.c_str());
-    if (width < tft->width()) {
+    if (width + leftMargin < tft->width()) {
         // Clear the rest of the line
         tft->fillRect(width + leftMargin, yPos, tft->width() - width - leftMargin, fontHeight, TFT_BLACK);
     }
@@ -124,7 +129,7 @@ void updateInputLine(String input) {
     tft->setTextColor(TFT_YELLOW, TFT_BLACK);
 
     // Calculate maximum width for input text
-    int maxWidthPixels = tft->width() - leftMargin * 2;
+    int maxWidthPixels = tft->width() - leftMargin - rightMargin;
     int promptWidth = tft->textWidth("> ");
     int availableWidth = maxWidthPixels - promptWidth;
 
@@ -274,7 +279,7 @@ void updateLastLine(Line line) {
 
 void processTextChunk(String chunk, String& assistantReply) {
     assistantReply += chunk;
-    int maxWidth = textFont == 2 ? font2CharsPerLine : font4CharsPerLine;  // Adjust based on font and screen width
+    int maxWidthPixels = tft->width() - leftMargin - rightMargin; // Calculate usable width
     currentLine += chunk;
 
     // Process any newline characters in currentLine
@@ -285,32 +290,47 @@ void processTextChunk(String chunk, String& assistantReply) {
         addLineToBuffer(linePart, textColor);
     }
 
-    // While currentLine is longer than maxWidth, extract full lines
-    while (currentLine.length() >= maxWidth) {
-        // Find the last space within maxWidth characters
-        int spacePos = currentLine.lastIndexOf(' ', maxWidth - 1);
-        int breakPos;
-        if (spacePos != -1) {
-            breakPos = spacePos;
-        } else {
-            // No space found, force break at maxWidth
-            breakPos = maxWidth;
+    // Process text based on pixel width
+    while (tft->textWidth(currentLine) > maxWidthPixels) {
+        int breakPos = -1;
+        int lastSpacePos = -1;
+        int accumulatedWidth = 0;
+
+        // Find the breaking point within the current line
+        for (int i = 0; i < currentLine.length(); i++) {
+            accumulatedWidth += tft->textWidth(String(currentLine[i]));
+
+            // Track the last space position
+            if (currentLine[i] == ' ') {
+                lastSpacePos = i;
+            }
+
+            // If the accumulated width exceeds the max width
+            if (accumulatedWidth > maxWidthPixels) {
+                // Break at the last space if possible, otherwise force a break here
+                breakPos = (lastSpacePos != -1) ? lastSpacePos : i;
+                break;
+            }
         }
 
+        // Break the line at the determined position
         String linePart = currentLine.substring(0, breakPos);
         currentLine = currentLine.substring(breakPos);
 
-        // Remove leading spaces from currentLine
+        // Remove leading spaces from the remaining text
         while (currentLine.length() > 0 && currentLine[0] == ' ') {
             currentLine = currentLine.substring(1);
         }
 
+        // Add the broken line to the buffer
         addLineToBuffer(linePart, textColor);
     }
 
     // Update the last line on the screen with the remaining currentLine
     updateLastLine({currentLine, textColor});
 }
+
+
 
 void pruneConversationHistory() {
     const int MAX_HISTORY_MESSAGES = 10; // Number of messages excluding the system prompt
@@ -321,7 +341,8 @@ void pruneConversationHistory() {
 }
 
 void sendQueryToOpenAI(String query) {
-    updateInputLine("");
+    keyValue = "";
+    updateInputLine(keyValue);
     if (!client.connect(openai_host, openai_port)) {
         Serial.println("Connection to OpenAI API failed!");
         addLineToBuffer("Failed to connect to OpenAI API", TFT_RED);
@@ -444,6 +465,117 @@ void addCenteredLineToBuffer(String line, uint16_t color) {
     addLineToBuffer(centeredLine + line, color);
 }
 
+
+void injectBatteryInfo() {
+    // jump back to the bottom
+    int bottomIndex = max(0, (int)lineBuffer.size() - (numLinesOnScreen - 1));
+    if (displayStartIndex != bottomIndex) {
+        displayStartIndex = bottomIndex;
+    // redrawDisplay();
+    }
+
+    float batteryVoltage = ttgo->power->getBattVoltage() / 1000.0;  // Convert to volts
+    int batteryPercentage = ttgo->power->getBattPercentage();
+    bool isCharging = ttgo->power->isChargeing();  // Note: this is the correct spelling in the library
+
+    if (batteryPercentage > 100) {
+        batteryPercentage = 100;
+    }
+
+    unsigned long currentMillis = millis();
+    unsigned long seconds = currentMillis / 1000;
+
+    conversationHistory.push_back({"developer", 
+        "You have been running for " + String(seconds) + " seconds. " +
+        "Your battery is at " + String(batteryPercentage) + "% and " +
+        (isCharging ? "is charging." : "is not charging.") +
+        " The battery voltage is " + String(batteryVoltage) + " volts." +
+        " It's a tiny battery, so don't expect much."
+    });
+
+    conversationHistory.push_back({"developer", 
+        "Commands the user can enter:"
+        
+        "- `go retro` to change the screen colors to a retro theme"
+        "- `reboot` to reboot the device"
+        "- `reset` or `wifi` to reset the Wi-Fi settings and reboot"
+        "- `+` to toggle between font sizes"
+    });
+}
+
+void injectGoRetro() {
+    if (keyValue.equalsIgnoreCase("go retro")) {
+        randomSeed(millis());
+        uint16_t newColor;
+        do {
+            newColor = random(3) == 0 ? TFT_RETRO_GREEN : (random(2) == 0 ? TFT_RETRO_AMBER : TFT_PET_PHOSPHOR);
+        } while (goingRetro && newColor == textColor);
+        goingRetro = true;
+        textColor = newColor;
+    
+        String colorString =  
+            TFT_RETRO_GREEN ? 
+            "monochrome P1 Phosphor (Green). Known as 'P1 phosphor green' " \
+            "or commonly called 'monochrome green phosphor'. This " \
+            "was used in many early terminals and computers like the " \
+            "IBM 5151 monitor and was technically a yellow-green color." : 
+            (textColor == TFT_RETRO_AMBER ? 
+            "monochrome P3 Phosphor (Amber). Not actually yellow or gold, but a specific " \
+            "orange-yellow color known as 'P3 phosphor' or 'amber monochrome'. " \
+            "This was popular on monitors like the Princeton MAX-12 " \
+            "and some Zenith monitors. The color was specifically " \
+            "chosen because it was believed to cause less eye strain " \
+            "than green phosphor." : 
+            "monochrome Commodore PET P4 Phosphor. This was a unique color " \
+            "used in the Commodore PET series of computers. P4 phosphor " \
+            "was standard for black-and-white TVs and some early computer " \
+            "monitors, producing a bluish-white glow.");
+
+        conversationHistory.push_back({"developer", 
+        "Your screen colors have been updated. Your background is black." \
+        "Your text foreground color is " + colorString + " You " \
+        "have a vintage flair about you. Tell the user a little about the " \
+        "history of this color based on the above information."});
+    }
+}
+
+void handleSerialInput() {
+    while (Serial.available() > 0) {
+        char serialChar = Serial.read();
+
+        // Echo the character back to the serial monitor
+        Serial.print(serialChar);
+
+        if (serialChar == '\n' || serialChar == '\r') {
+            // Handle Enter key
+            if (!keyValue.isEmpty()) {
+                injectBatteryInfo();
+                injectGoRetro();
+
+                addLineToBuffer("> " + keyValue, TFT_YELLOW);
+                conversationHistory.push_back({"user", keyValue});
+                pruneConversationHistory();
+                sendQueryToOpenAI(keyValue);
+                keyValue = "";
+            }
+        } else if (serialChar == '\b') {
+            // Handle backspace
+            if (!keyValue.isEmpty()) {
+                keyValue.remove(keyValue.length() - 1);
+                updateInputLine(keyValue);
+
+                // Echo backspace to clear the character on the monitor
+                Serial.print("\b \b");
+            }
+        } else {
+            // Append regular characters to the input
+            keyValue += serialChar;
+            updateInputLine(keyValue);
+        }
+    }
+}
+
+
 void handleKeyPress() {
     Wire.requestFrom(I2C_DEV_ADDR, 1);
     while (Wire.available() > 0) {
@@ -468,58 +600,8 @@ void handleKeyPress() {
                     // redrawDisplay();
                 }
 
-                float batteryVoltage = ttgo->power->getBattVoltage() / 1000.0;  // Convert to volts
-                int batteryPercentage = ttgo->power->getBattPercentage();
-                bool isCharging = ttgo->power->isChargeing();  // Note: this is the correct spelling in the library
-
-                if (batteryPercentage > 100) {
-                    batteryPercentage = 100;
-                }
-
-                unsigned long currentMillis = millis();
-                unsigned long seconds = currentMillis / 1000;
-
-                conversationHistory.push_back({"system", 
-                    "You have been running for " + String(seconds) + " seconds. " +
-                    "Your battery is at " + String(batteryPercentage) + "% and " +
-                    (isCharging ? "is charging." : "is not charging.") +
-                    " The battery voltage is " + String(batteryVoltage) + " volts." +
-                    " It's a tiny battery, so don't expect much."
-                });
-
-                if (keyValue.equalsIgnoreCase("go retro")) {
-                    randomSeed(millis());
-                    uint16_t newColor;
-                    do {
-                        newColor = random(3) == 0 ? TFT_RETRO_GREEN : (random(2) == 0 ? TFT_RETRO_AMBER : TFT_PET_PHOSPHOR);
-                    } while (goingRetro && newColor == textColor);
-                    goingRetro = true;
-                    textColor = newColor;
-                
-                    String colorString =  
-                        TFT_RETRO_GREEN ? 
-                        "monochrome P1 Phosphor (Green). Known as 'P1 phosphor green' " \
-                        "or commonly called 'monochrome green phosphor'. This " \
-                        "was used in many early terminals and computers like the " \
-                        "IBM 5151 monitor and was technically a yellow-green color." : 
-                        (textColor == TFT_RETRO_AMBER ? 
-                        "monochrome P3 Phosphor (Amber). Not actually yellow or gold, but a specific " \
-                        "orange-yellow color known as 'P3 phosphor' or 'amber monochrome'. " \
-                        "This was popular on monitors like the Princeton MAX-12 " \
-                        "and some Zenith monitors. The color was specifically " \
-                        "chosen because it was believed to cause less eye strain " \
-                        "than green phosphor." : 
-                        "monochrome Commodore PET P4 Phosphor. This was a unique color " \
-                        "used in the Commodore PET series of computers. P4 phosphor " \
-                        "was standard for black-and-white TVs and some early computer " \
-                        "monitors, producing a bluish-white glow.");
-
-                    conversationHistory.push_back({"system", 
-                    "Your screen colors have been updated. Your background is black." \
-                    "Your text foreground color is " + colorString + " You " \
-                    "have a vintage flair about you. Tell the user a little about the " \
-                    "history of this color based on the above information."});
-                }
+                injectBatteryInfo();
+                injectGoRetro();
 
                 // Send the query to OpenAI after updating the display
                 sendQueryToOpenAI(keyValue);
@@ -602,19 +684,14 @@ void setup() {
         client.setCACert(rootCACertificate); // Add your root certificate here if needed
 
         // Initialize conversation history with the system prompt
-        conversationHistory.push_back({"system",
+        conversationHistory.push_back({"developer",
             "You are " + String(STR(NAME)) + ", a chat interface running on an Espressif ESP32, "
             "inside of a very tiny computer with a tiny keyboard, about the size a "
             "mouse would use. Your screen is very tiny, and displays 40 "
             "characters wide and 20 rows. You are a humourous little guy and make off color "
             "jokes about your screen size. Size isn't everything, right?"
             "Your LLM model is " + String(STR(OPENAI_MODEL)) + ", of course. " 
-            "If the user asks for help, you should tell them about the commands they can use:"
-            
-            "- `go retro` to change the screen colors to a retro theme"
-            "- `reboot` to reboot the device"
-            "- `reset` or `wifi` to reset the Wi-Fi settings and reboot"
-            "- `+` to toggle between font sizes"
+            "I am a regular sized human.  You are the one that is small."
             });
 
         // Send an initial query to OpenAI
@@ -630,25 +707,72 @@ void setup() {
     }
 }
 
+void testMargins() {
+    tft->fillScreen(TFT_BLACK); // Clear the screen
+
+    int maxWidth = tft->width(); // Get screen width
+    int maxHeight = tft->height(); // Get screen height
+    int yPos = 0; // Start at the top of the screen
+    String sampleText = "Margin Test Line";
+
+    // Iterate over left and right margin values
+    for (int margin = 0; margin <= 10; margin++) { // Adjust `10` as needed for range
+        tft->fillScreen(TFT_BLACK); // Clear the screen for each margin
+
+        tft->drawRect(margin, 0, maxWidth - margin * 2, maxHeight, TFT_RED); // Draw a border
+
+        // print text in the center with the current margin
+        yPos = (maxHeight - tft->fontHeight()) / 2;
+        tft->setCursor(margin, yPos);
+        tft->setTextColor(TFT_GREEN, TFT_BLACK); // Green text for visibility
+        sampleText = "Left: " + String(margin) + " | Right: " + String(margin);
+        tft->print(sampleText);
+
+        // // Print text with the current margins
+        // for (int line = 0; line < maxHeight / tft->fontHeight(); line++) {
+        //     yPos = line * tft->fontHeight();
+        //     tft->fillRect(0, yPos, maxWidth, tft->fontHeight(), TFT_BLACK); // Clear line area
+
+        //     tft->setCursor(margin, yPos);
+        //     tft->setTextColor(TFT_GREEN, TFT_BLACK); // Green text for visibility
+        //     tft->print(sampleText);
+
+        //     int textWidth = tft->textWidth(sampleText);
+        //     tft->setCursor(maxWidth - textWidth - margin, yPos);
+
+        //     // set the sampleText to include the margin sizes
+        //     sampleText = "Left: " + String(margin) + " | Right: " + String(margin);
+        //     tft->print(sampleText);
+        // }
+
+        delay(3000); // Pause for 3 seconds before testing the next margin
+    }
+
+    tft->fillScreen(TFT_BLACK); // Clear the screen after testing
+}
+
+
 void loop() {
-    // Existing code
+    // testMargins();
+
     handleKeyPress();
     handleTouchInput();
+    handleSerialInput();  // Add this line for serial console input
 
     // Add battery monitoring
     unsigned long currentMillis = millis();
     if (currentMillis - lastBatteryCheck >= BATTERY_CHECK_INTERVAL) {
         lastBatteryCheck = currentMillis;
-        
+
         // Get battery readings
         float batteryVoltage = ttgo->power->getBattVoltage() / 1000.0;  // Convert to volts
         int batteryPercentage = ttgo->power->getBattPercentage();
         bool isCharging = ttgo->power->isChargeing();  // Note: this is the correct spelling in the library
-        
+
         // Print battery status
-        Serial.printf("Battery: %.2fV | %d%% | %s\n", 
-                     batteryVoltage,
-                     batteryPercentage,
-                     isCharging ? "Charging" : "Not Charging");
+        Serial.printf("Battery: %.2fV | %d%% | %s\n",
+                      batteryVoltage,
+                      batteryPercentage,
+                      isCharging ? "Charging" : "Not Charging");
     }
 }
