@@ -341,8 +341,9 @@ void pruneConversationHistory() {
 }
 
 void sendQueryToOpenAI(String query) {
-    updateInputLine(keyValue);
-    if (!client.connect(openai_host, openai_port)) {
+    keyValue = "";
+    if (!client.connect(openai_host, openai_port))
+    {
         Serial.println("Connection to OpenAI API failed!");
         addLineToBuffer("Failed to connect to OpenAI API", TFT_RED);
         return;
@@ -464,13 +465,12 @@ void addCenteredLineToBuffer(String line, uint16_t color) {
     addLineToBuffer(centeredLine + line, color);
 }
 
-void handleRebootReset() {
-    Serial.println("Checking for reboot/reset commands..." + keyValue);
-    if (keyValue.equalsIgnoreCase("reboot")) {
+void handleRebootReset(String input) {
+    if (input.equalsIgnoreCase("reboot")) {
         Serial.println("Rebooting...");
         delay(2000);
         ESP.restart(); // Or ESP.reboot() in some frameworks
-    } else if (keyValue.equalsIgnoreCase("reset") || keyValue.equalsIgnoreCase("wifi")) {
+    } else if (input.equalsIgnoreCase("reset") || input.equalsIgnoreCase("wifi")) {
         Serial.println("Resetting wifi and rebooting...");
         delay(2000);
         wm.resetSettings();
@@ -568,9 +568,11 @@ void handleSerialInput() {
                 addLineToBuffer("> " + keyValue, TFT_YELLOW);
                 conversationHistory.push_back({"user", keyValue});
                 pruneConversationHistory();
-                sendQueryToOpenAI(keyValue);
-                handleRebootReset();
-                keyValue = "";
+
+                String input = keyValue;
+                updateInputLine("");
+                sendQueryToOpenAI(input); // this will clear `keyValue`, that's why we save it in `input`
+                handleRebootReset(input);
             }
         } else if (serialChar == '\b') {
             // Handle backspace
@@ -617,11 +619,12 @@ void handleKeyPress() {
                 handleBatteryInfo();
                 handleGoRetro();
 
+                String input = keyValue;
+
                 // Send the query to OpenAI after updating the display
-                sendQueryToOpenAI(keyValue);
-                handleRebootReset();
-                keyValue = "";
-                // redrawDisplay();
+                updateInputLine("");
+                sendQueryToOpenAI(input);  // this will clear `keyValue`, that's why we save it in `input`
+                handleRebootReset(input);
             }
         } else if (key_ch == 0x2B) { // Handle '+' key to make toggle the font size to 4 and back to 2
             if (textFont == 2) {
