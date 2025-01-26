@@ -103,10 +103,15 @@ void printLineToTFT(int lineIndexOnScreen, Line line) {
         lineIndexOnScreen = numLinesOnScreen - 2;  // Prevent overwriting the input line
     }
     int yPos = lineIndexOnScreen * fontHeight;
-    tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
+    // tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
     tft->setCursor(leftMargin, yPos);
     tft->setTextColor(line.color, TFT_BLACK);  // Use the color from the line
     tft->print(line.text.c_str());
+    int16_t width = tft->textWidth(line.text.c_str());
+    if (width < tft->width()) {
+        // Clear the rest of the line
+        tft->fillRect(width + leftMargin, yPos, tft->width() - width - leftMargin, fontHeight, TFT_BLACK);
+    }
 }
 
 void updateInputLine(String input) {
@@ -168,7 +173,7 @@ void updateInputLine(String input) {
 
 void redrawDisplay() {
     // Clear the display area except the input line
-    tft->fillRect(0, 0, tft->width(), tft->height() - fontHeight, TFT_BLACK);
+    // tft->fillRect(0, 0, tft->width(), tft->height() - fontHeight, TFT_BLACK);
     int maxLines = min(numLinesOnScreen - 1, (int)lineBuffer.size() - displayStartIndex);
     for (int i = 0; i < maxLines; i++) {
         int lineIndex = displayStartIndex + i;
@@ -176,6 +181,10 @@ void redrawDisplay() {
             printLineToTFT(i, lineBuffer[lineIndex]);
         }
     }
+
+    int16_t yPos = (numLinesOnScreen - 1) * fontHeight;
+    tft->fillRect(0, yPos, tft->width(), fontHeight, TFT_BLACK);
+
     // Update the input line
     updateInputLine(keyValue);
 }
@@ -480,15 +489,20 @@ void handleKeyPress() {
 
                 if (keyValue.equalsIgnoreCase("go retro")) {
                     randomSeed(millis());
-                    uint16_t color = random(3) == 0 ? TFT_RETRO_GREEN : (random(2) == 0 ? TFT_RETRO_AMBER : TFT_PET_PHOSPHOR);
-                    textColor = color;
-                    String colorString = color == 
+                    uint16_t newColor;
+                    do {
+                        newColor = random(3) == 0 ? TFT_RETRO_GREEN : (random(2) == 0 ? TFT_RETRO_AMBER : TFT_PET_PHOSPHOR);
+                    } while (goingRetro && newColor == textColor);
+                    goingRetro = true;
+                    textColor = newColor;
+                
+                    String colorString =  
                         TFT_RETRO_GREEN ? 
                         "monochrome P1 Phosphor (Green). Known as 'P1 phosphor green' " \
                         "or commonly called 'monochrome green phosphor'. This " \
                         "was used in many early terminals and computers like the " \
                         "IBM 5151 monitor and was technically a yellow-green color." : 
-                        (color == TFT_RETRO_AMBER ? 
+                        (textColor == TFT_RETRO_AMBER ? 
                         "monochrome P3 Phosphor (Amber). Not actually yellow or gold, but a specific " \
                         "orange-yellow color known as 'P3 phosphor' or 'amber monochrome'. " \
                         "This was popular on monitors like the Princeton MAX-12 " \
@@ -521,7 +535,7 @@ void handleKeyPress() {
                     ESP.restart();
                 }
                 keyValue = "";
-                redrawDisplay();
+                // redrawDisplay();
             }
         } else if (key_ch == 0x2B) { // Handle '+' key to make toggle the font size to 4 and back to 2
             if (textFont == 2) {
@@ -594,8 +608,14 @@ void setup() {
             "mouse would use. Your screen is very tiny, and displays 40 "
             "characters wide and 20 rows. You are a humourous little guy and make off color "
             "jokes about your screen size. Size isn't everything, right?"
-            "Your LLM model is " +
-                String(STR(OPENAI_MODEL)) + ", of course. "});
+            "Your LLM model is " + String(STR(OPENAI_MODEL)) + ", of course. " 
+            "If the user asks for help, you should tell them about the commands they can use:"
+            
+            "- `go retro` to change the screen colors to a retro theme"
+            "- `reboot` to reboot the device"
+            "- `reset` or `wifi` to reset the Wi-Fi settings and reboot"
+            "- `+` to toggle between font sizes"
+            });
 
         // Send an initial query to OpenAI
         setTextFont(2);
