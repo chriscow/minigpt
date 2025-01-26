@@ -106,7 +106,7 @@ void printLineToTFT(int lineIndexOnScreen, Line line) {
         lineIndexOnScreen = numLinesOnScreen - 2;  // Prevent overwriting the input line
     }
     int yPos = lineIndexOnScreen * fontHeight;
-    
+
     // clear the left margin of any "dirt" from previous text
     tft->fillRect(0, yPos, leftMargin, fontHeight, TFT_BLACK);
     tft->setCursor(leftMargin, yPos);
@@ -341,7 +341,6 @@ void pruneConversationHistory() {
 }
 
 void sendQueryToOpenAI(String query) {
-    keyValue = "";
     updateInputLine(keyValue);
     if (!client.connect(openai_host, openai_port)) {
         Serial.println("Connection to OpenAI API failed!");
@@ -465,8 +464,22 @@ void addCenteredLineToBuffer(String line, uint16_t color) {
     addLineToBuffer(centeredLine + line, color);
 }
 
+void handleRebootReset() {
+    Serial.println("Checking for reboot/reset commands..." + keyValue);
+    if (keyValue.equalsIgnoreCase("reboot")) {
+        Serial.println("Rebooting...");
+        delay(2000);
+        ESP.restart(); // Or ESP.reboot() in some frameworks
+    } else if (keyValue.equalsIgnoreCase("reset") || keyValue.equalsIgnoreCase("wifi")) {
+        Serial.println("Resetting wifi and rebooting...");
+        delay(2000);
+        wm.resetSettings();
+        ESP.restart();
+    }
+}
 
-void injectBatteryInfo() {
+
+void handleBatteryInfo() {
     // jump back to the bottom
     int bottomIndex = max(0, (int)lineBuffer.size() - (numLinesOnScreen - 1));
     if (displayStartIndex != bottomIndex) {
@@ -503,7 +516,7 @@ void injectBatteryInfo() {
     });
 }
 
-void injectGoRetro() {
+void handleGoRetro() {
     if (keyValue.equalsIgnoreCase("go retro")) {
         randomSeed(millis());
         uint16_t newColor;
@@ -549,13 +562,14 @@ void handleSerialInput() {
         if (serialChar == '\n' || serialChar == '\r') {
             // Handle Enter key
             if (!keyValue.isEmpty()) {
-                injectBatteryInfo();
-                injectGoRetro();
+                handleBatteryInfo();
+                handleGoRetro();
 
                 addLineToBuffer("> " + keyValue, TFT_YELLOW);
                 conversationHistory.push_back({"user", keyValue});
                 pruneConversationHistory();
                 sendQueryToOpenAI(keyValue);
+                handleRebootReset();
                 keyValue = "";
             }
         } else if (serialChar == '\b') {
@@ -600,22 +614,12 @@ void handleKeyPress() {
                     // redrawDisplay();
                 }
 
-                injectBatteryInfo();
-                injectGoRetro();
+                handleBatteryInfo();
+                handleGoRetro();
 
                 // Send the query to OpenAI after updating the display
                 sendQueryToOpenAI(keyValue);
-
-                if (keyValue.equalsIgnoreCase("reboot")) {
-                    Serial.println("Rebooting...");
-                    delay(2000);
-                    ESP.restart(); // Or ESP.reboot() in some frameworks
-                } else if (keyValue.equalsIgnoreCase("reset") || keyValue.equalsIgnoreCase("wifi")) {
-                    Serial.println("Resetting wifi and reboothing...");
-                    delay(2000);
-                    wm.resetSettings();
-                    ESP.restart();
-                }
+                handleRebootReset();
                 keyValue = "";
                 // redrawDisplay();
             }
