@@ -1,6 +1,6 @@
 # MiniGPT
 
-<img src="[https://your-image-url.type](https://chriscow-assets.sfo3.cdn.digitaloceanspaces.com/minigpt/minigpt-closeup.jpg)" height="100">
+<img src="https://your-image-url.type](https://chriscow-assets.sfo3.cdn.digitaloceanspaces.com/minigpt/minigpt-closeup.jpg" height="100">
 
 MiniGPT is a charming and compact desktop toy that brings the power of OpenAI's GPT-4o to a tiny vintage-style computer. Built to run on a Lilith T-Watch with an attached keyboard, this project combines retro aesthetics with modern AI capabilities, making it a delightful addition to your workspace.
 
