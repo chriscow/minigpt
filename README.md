@@ -2,11 +2,11 @@
 
 <img src="https://chriscow-assets.sfo3.cdn.digitaloceanspaces.com/minigpt/minigpt-closeup.jpg" height="400">
 
-MiniGPT is a charming and compact desktop toy that brings the power of OpenAI's GPT-4o to a tiny vintage-style computer. Built to run on a Lilith T-Watch with an attached keyboard, this project combines retro aesthetics with modern AI capabilities, making it a delightful addition to your workspace.
+MiniGPT is a charming and compact desktop toy that brings the power of OpenAI's GPT-4o to a tiny vintage-style computer. Built to run on a Lilygo T-Watch with an attached keyboard, this project combines retro aesthetics with modern AI capabilities, making it a delightful addition to your workspace.
 
 ## Overview
 
-MiniGPT is designed to resemble a miniature vintage computer, reminiscent of the classic Commodore PET. Powered by an ESP32 microcontroller, it connects to the OpenAI GPT-4o API, allowing you to chat and interact with the AI through this adorable little device. It's a fun and functional project that blends nostalgia with cutting-edge technology.
+MiniGPT resembles a miniature vintage computer, reminiscent of the classic Commodore PET. Powered by an ESP32 microcontroller, it connects to the OpenAI GPT-4o API, allowing you to chat and interact with the AI through this adorable little device. It's a fun and functional project that blends nostalgia with cutting-edge technology.
 
 ## Features
 
@@ -51,11 +51,11 @@ MiniGPT is designed to resemble a miniature vintage computer, reminiscent of the
    - Replace the placeholders with your actual OpenAI API key, desired model, and branding details.
 
 4. **Build and Upload**:
-   - Use PlatformIO to build and upload the project to your Lilith T-Watch.
+   - Use PlatformIO to build and upload the project to your Lilygo T-Watch.
 
 ### Usage
 
-Once the firmware is uploaded, power on your Lilith T-Watch and start chatting with MiniGPT! The device will connect to the OpenAI API, allowing you to interact with the AI in real-time.
+Once the firmware is uploaded, power on your Lilygo T-Watch. You will need to use your phone or computer to join the "MiniGPT" Wifi hotspot. Once you join, you will be presented with a web UI to configure the SSID and password so it can join your Wifi access point of choice.  Once configured, it will reboot.  You will see a welcome message from OpenAI and you are ready to start chatting with MiniGPT! 
 
 ## License
 
@@ -68,7 +68,7 @@ Contributions are welcome! If you have any ideas, improvements, or bug fixes, fe
 ## Acknowledgments
 
 - **OpenAI**: For providing the GPT-4o API.
-- **Lilith T-Watch**: For the hardware platform that makes this project possible.
+- **Lilygo T-Watch**: For the hardware platform that makes this project possible.
 - **PlatformIO**: For the excellent development environment.
 
 ---
