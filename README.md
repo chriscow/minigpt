@@ -17,7 +17,7 @@ MiniGPT is designed to resemble a miniature vintage computer, reminiscent of the
 
 ## Getting Started
 
-![Desktop Toy](https://chriscow-assets.sfo3.cdn.digitaloceanspaces.com/minigpt/minigpt-desktop-toy.jpg)
+<img src="https://chriscow-assets.sfo3.cdn.digitaloceanspaces.com/minigpt/minigpt-desktop-toy.jpg" height="400">
 
 ### Prerequisites
 
