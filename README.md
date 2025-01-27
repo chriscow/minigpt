@@ -1,4 +1,3 @@
-```markdown
 # MiniGPT
 
 ![MiniGPT](https://chriscow-assets.sfo3.cdn.digitaloceanspaces.com/minigpt/minigpt-closeup.jpg)
@@ -75,6 +74,3 @@ Contributions are welcome! If you have any ideas, improvements, or bug fixes, fe
 ---
 
 Enjoy your MiniGPT and happy chatting! 🚀
-```
-
-This `README.md` provides a clear and concise overview of your MiniGPT project, including setup instructions, usage, and licensing information. It’s designed to help users quickly understand and get started with your project.
