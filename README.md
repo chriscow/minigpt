@@ -30,7 +30,7 @@ MiniGPT is designed to resemble a miniature vintage computer, reminiscent of the
 
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/your-username/MiniGPT.git
+   git clone https://github.com/chriscow/MiniGPT.git
    cd MiniGPT
    ```
 
